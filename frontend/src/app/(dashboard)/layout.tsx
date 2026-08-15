@@ -32,6 +32,7 @@ import { useThemeStore } from "@/store/themeStore";
 import { usePortfolioStore } from "@/store/portfolioStore";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/Badge";
+import { authClient } from "@/lib/auth-client";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -67,8 +68,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { name: "Settings", href: "/settings", icon: <Settings className="h-5 w-5" /> }
   ];
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await authClient.signOut();
     router.push("/");
+    router.refresh();
   };
 
   return (
