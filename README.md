@@ -10,8 +10,7 @@ The browser only talks to Next.js. The proxy validates the Better Auth session, 
 
 ## Setup
 
-1. Copy `backend/.env.example` to `backend/.env`, and `frontend/.env.local.example` to `frontend/.env.local`.
-2. Set both `DATABASE_URL` values to the Supabase PostgreSQL connection string and set the same long random `INTERNAL_API_SECRET` in both files. Set an independent `BETTER_AUTH_SECRET` in the frontend file.
+1. Set the values in `backend/.env` and `frontend/.env`. Both `DATABASE_URL` values must use the Supabase PostgreSQL connection string. Set the same long random `INTERNAL_API_SECRET` in both files and an independent `BETTER_AUTH_SECRET` in the frontend file.
 3. Create Better Auth's required `user`, `session`, `account`, and `verification` tables from `frontend/`:
 
    ```powershell
