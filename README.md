@@ -1,147 +1,48 @@
- project structure .
+# Portfolio X-Ray
 
- frotnend
+Portfolio X-Ray is a Next.js and FastAPI foundation for authenticated portfolio records. CAS parsing and portfolio analytics are intentionally deferred.
 
- src/
-├── app/                  # Next.js App Router Pages
-│   ├── (auth)/           # Authentication routes (login, signup, OTP, etc.)
-│   ├── (dashboard)/      # Authenticated dashboard workspace
-│   │   ├── dashboard/    # Main portfolio metrics and summary charts
-│   │   ├── portfolio/    # Detail Holdings Table (expandable stocks/funds)
-│   │   ├── diagnostics/  # Overlap, CAS upload, fee audit, diversification, nominee
-│   │   ├── simulator/    # Crash testing, what-if, macro risk, correlation matrix
-│   │   ├── advanced/     # Tax, WhatsApp AI, behavioral warnings, conglomerate exposure
-│   │   ├── advisor/      # B2B Advisor dashboard
-│   │   ├── developer/    # API/SDK Webhook & Developer portal
-│   │   ├── reports/      # PDF-style client reports
-│   │   └── settings/     # Profile, security, notifications, accounts
-│   ├── layout.tsx        # App-wide root layout
-│   └── page.tsx          # Premium Landing Page (Hero, Features, Pricing, Testimonials)
-├── components/           # Reusable generic UI components (Card, Table, Toast, etc.)
-├── features/             # Feature-specific components and sub-modules
-├── services/             # Abstract API/mock service layer
-├── hooks/                # Custom React hooks (theme, viewport, search)
-├── lib/                  # Utilities (class merger, formatters, calculations)
-├── types/                # TypeScript interface definitions
-├── constants/            # Constants (color codes, route tables)
-├── data/                 # Mock JSON data store
+## Architecture
 
-└── store/                # Zustand global state (auth, portfolio, settings)
+`Next.js (Better Auth) → authenticated server proxy → FastAPI → SQLAlchemy → Supabase PostgreSQL`
 
+The browser only talks to Next.js. The proxy validates the Better Auth session, then signs its FastAPI request using `INTERNAL_API_SECRET`. FastAPI rejects requests with missing, invalid, or expired signatures. A raw browser `user_id` is never trusted.
 
+## Setup
 
+1. Set the values in `backend/.env` and `frontend/.env`. Both `DATABASE_URL` values must use the Supabase PostgreSQL connection string. Set the same long random `INTERNAL_API_SECRET` in both files and an independent `BETTER_AUTH_SECRET` in the frontend file.
+3. Create Better Auth's required `user`, `session`, `account`, and `verification` tables from `frontend/`:
 
-portfolio-xray/
-│
-├── frontend/                         # Next.js 15
-│   │
-│   ├── src/
-│   │   ├── app/
-│   │   │   ├── (auth)/
-│   │   │   │   ├── login/
-│   │   │   │   │   └── page.tsx
-│   │   │   │   └── signup/
-│   │   │   │       └── page.tsx
-│   │   │   │
-│   │   │   ├── dashboard/
-│   │   │   │   └── page.tsx
-│   │   │   │
-│   │   │   ├── portfolio/
-│   │   │   │   └── page.tsx
-│   │   │   │
-│   │   │   ├── upload/
-│   │   │   │   └── page.tsx
-│   │   │   │
-│   │   │   ├── api/
-│   │   │   │   └── auth/
-│   │   │   │
-│   │   │   ├── layout.tsx
-│   │   │   └── page.tsx
-│   │   │
-│   │   ├── components/
-│   │   │   ├── ui/
-│   │   │   ├── auth/
-│   │   │   ├── dashboard/
-│   │   │   ├── portfolio/
-│   │   │   └── upload/
-│   │   │
-│   │   ├── lib/
-│   │   │   ├── auth.ts
-│   │   │   ├── auth-client.ts
-│   │   │   └── api.ts
-│   │   │
-│   │   ├── hooks/
-│   │   ├── types/
-│   │   └── utils/
-│   │
-│   ├── public/
-│   ├── .env.local
-│   ├── package.json
-│   └── tsconfig.json
-│
-│
-├── backend/                          # FastAPI
-│   │
-│   ├── app/
-│   │   ├── main.py
-│   │   │
-│   │   ├── api/
-│   │   │   ├── health.py
-│   │   │   ├── auth.py
-│   │   │   ├── portfolio.py
-│   │   │   └── cas.py
-│   │   │
-│   │   ├── core/
-│   │   │   ├── config.py
-│   │   │   └── security.py
-│   │   │
-│   │   ├── db/
-│   │   │   ├── database.py
-│   │   │   └── dependencies.py
-│   │   │
-│   │   ├── models/
-│   │   │   ├── user.py
-│   │   │   ├── portfolio.py
-│   │   │   ├── holding.py
-│   │   │   ├── transaction.py
-│   │   │   └── import_record.py
-│   │   │
-│   │   ├── schemas/
-│   │   │   ├── user.py
-│   │   │   ├── portfolio.py
-│   │   │   ├── holding.py
-│   │   │   └── cas.py
-│   │   │
-│   │   ├── services/
-│   │   │   ├── portfolio_service.py
-│   │   │   └── cas_service.py
-│   │   │
-│   │   ├── parsers/
-│   │   │   ├── base.py
-│   │   │   ├── detector.py
-│   │   │   ├── cams.py
-│   │   │   └── kfintech.py
-│   │   │
-│   │   └── analytics/
-│   │       ├── hhi.py
-│   │       ├── exposure.py
-│   │       ├── diversification.py
-│   │       └── fees.py
-│   │
-│   ├── tests/
-│   │   ├── test_health.py
-│   │   ├── test_cas.py
-│   │   └── test_portfolio.py
-│   │
-│   ├── requirements.txt
-│   └── .env
-│
-│
-├── docs/
-│   ├── architecture.md
-│   ├── api-contract.md
-│   └── database.md
-│
-├── .gitignore
-├── README.md
-└── docker-compose.yml                 # later
+   ```powershell
+   npx auth@latest migrate
+   ```
+
+4. Apply the Portfolio X-Ray tables from `backend/`:
+
+   ```powershell
+   .\venv\Scripts\Activate.ps1
+   alembic upgrade head
+   ```
+
+5. Run FastAPI from `backend/`:
+
+   ```powershell
+   uvicorn app.main:app --reload --port 8000
+   ```
+
+6. Run Next.js from `frontend/`:
+
+   ```powershell
+   npm run dev
+   ```
+
+Open `http://localhost:3000/signup`, then create a portfolio from `/dashboard`. FastAPI documentation is at `http://localhost:8000/docs`.
+
+## Tests
+
+```powershell
+cd backend
+.\venv\Scripts\python.exe -m pytest -q
+```
+
+See [architecture.md](docs/architecture.md) and [api-contract.md](docs/api-contract.md).
