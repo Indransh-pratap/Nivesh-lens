@@ -2,8 +2,23 @@ export type Portfolio = { id: string; name: string; total_value: number; created
 
 type ApiError = { error?: { message?: string } };
 
+/** Thrown specifically for an expired/invalid session (401), so callers can
+ *  distinguish "please log in again" from an ordinary request failure. */
+export class SessionExpiredError extends Error {
+  constructor() {
+    super("Your session has expired. Please log in again.");
+    this.name = "SessionExpiredError";
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/portfolio${path}`, { ...init, headers: { "Content-Type": "application/json", ...init?.headers } });
+  if (response.status === 401) {
+    if (typeof window !== "undefined") {
+      window.location.href = `/login?reason=session_expired&next=${encodeURIComponent(window.location.pathname)}`;
+    }
+    throw new SessionExpiredError();
+  }
   if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as ApiError;
     throw new Error(body.error?.message ?? "Unable to complete the request");

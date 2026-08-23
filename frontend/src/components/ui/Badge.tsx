@@ -2,22 +2,24 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 export interface BadgeProps extends React.HTMLAttributes<HTMLSpanElement> {
-  variant?: "primary" | "secondary" | "success" | "warning" | "danger" | "neutral" | "info";
+  variant?: "primary" | "secondary" | "success" | "warning" | "danger" | "neutral" | "info" | "brand" | "gold";
 }
 
 export function Badge({ className, variant = "neutral", ...props }: BadgeProps) {
   return (
     <span
       className={cn(
-        "inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border transition-colors",
+        "inline-flex items-center px-2 py-0.5 rounded-[var(--radius-sm)] text-[10.5px] font-medium border tracking-wide",
         {
-          "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-900/50": variant === "primary",
-          "bg-slate-100 text-slate-800 border-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:border-slate-700": variant === "secondary",
-          "bg-green-50 text-green-700 border-green-200 dark:bg-green-950/40 dark:text-green-400 dark:border-green-900/50": variant === "success",
-          "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-900/50": variant === "warning",
-          "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-900/50": variant === "danger",
-          "bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/40 dark:text-sky-400 dark:border-sky-900/50": variant === "info",
-          "bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-900 dark:text-slate-400 dark:border-slate-800": variant === "neutral",
+          "bg-[var(--primary-soft)] text-primary border-primary/25": variant === "primary" || variant === "brand",
+          "bg-accent text-muted-foreground border-border": variant === "secondary" || variant === "neutral",
+          "bg-[var(--positive-soft)] text-[var(--positive)] border-[var(--positive)]/25": variant === "success",
+          "bg-[var(--warning-soft)] text-[var(--warning)] border-[var(--warning)]/25": variant === "warning",
+          "bg-[var(--negative-soft)] text-[var(--negative)] border-[var(--negative)]/25": variant === "danger",
+          "bg-[var(--info-soft)] text-[var(--info)] border-[var(--info)]/25": variant === "info",
+          // Antique-gold accent — reserved for premium/marketing moments
+          // (landing page badges, trust markers), not everyday app UI.
+          "bg-[var(--nse-gold-soft)] text-[var(--nse-gold)] border-[var(--nse-gold)]/30": variant === "gold",
         },
         className
       )}

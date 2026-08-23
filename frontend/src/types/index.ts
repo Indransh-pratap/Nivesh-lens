@@ -1,9 +1,114 @@
-export type AssetType = "Stock" | "Mutual Fund" | "ETF" | "Cash" | "Gold";
+export type AssetType = "Stock" | "Mutual Fund" | "ETF" | "Gold" | "FD" | "EPF";
+
+// Legacy look-through shape used in portfolioData.ts
+export interface CompanyExposureItem {
+  id: string;
+  companyName: string;
+  ticker: string;
+  sector: string;
+  conglomerateGroup: string;
+  directValue: number;
+  directPercent: number;
+  indirectValue: number;
+  indirectPercent: number;
+  totalTrueValue: number;
+  totalTruePercent: number;
+  riskCategory: string;
+  promoterPledging: number;
+  fiiHolding: number;
+  supplyChainVulnerability: string;
+  heldViaFunds: {
+    fundName: string;
+    fundTicker: string;
+    fundAllocation: number;
+    indirectValue: number;
+  }[];
+}
+
+export interface ActivityLog {
+  id: string;
+  timestamp: string;
+  action: string;
+  details: string;
+  type: "sync" | "alert" | "update" | "info";
+}
+
+export interface UserProfile {
+  id: string;
+  name: string;
+  email: string;
+  phone: string;
+  panMasked: string;
+  kycStatus: "Verified" | "Pending" | "Action Required";
+  totalPortfolioValue: number;
+  totalGainLoss: number;
+  totalGainPercent: number;
+  folioCount: number;
+  accountAggregatorStatus: "Connected" | "Disconnected";
+  lastSyncedAt: string;
+}
+
+export interface HealthSubPillar {
+  id: string;
+  name: string;
+  score: number;
+  maxScore: number;
+  weight: number;
+  status: "Optimal" | "Moderate" | "Alert" | "Critical";
+  insight: string;
+}
+
+export interface HealthScoreData {
+  overallScore: number; // 300 to 900 scale
+  ratingGrade: "Prime" | "Healthy" | "Moderate Risk" | "Vulnerable";
+  percentileRank: number; // e.g. Top 15%
+  ratingText: string;
+  subPillars: HealthSubPillar[];
+}
+
+export interface WastedFeeSummary {
+  annualBleedAmount: number;
+  regularCommissionTotal: number;
+  duplicateTerTotal: number;
+  tenYearCompoundedLoss: number;
+  compoundingRate: number; // e.g. 12%
+}
+
+export interface TopExposureCompany {
+  id: string;
+  companyName: string;
+  ticker: string;
+  isin: string;
+  sector: string;
+  conglomerate: string;
+  directHoldingValue: number;
+  directPercent: number;
+  indirectHoldingValue: number;
+  indirectPercent: number;
+  totalTrueValue: number;
+  totalTruePercent: number;
+  riskTier: "Critical Danger" | "Elevated Risk" | "Optimal Spread";
+  lookThroughFundsCount: number;
+}
+
+export interface TransactionRecord {
+  id: string;
+  date: string;
+  type: "SIP Buy" | "Lump Sum Buy" | "Redemption" | "Switch In" | "Switch Out" | "Dividend Payout";
+  schemeName: string;
+  ticker: string;
+  folioNumber: string;
+  units: number;
+  nav: number;
+  amount: number;
+  status: "Executed" | "Settled" | "Processing";
+  transactionRef: string;
+}
 
 export interface StockExposure {
   name: string;
   ticker: string;
-  allocation: number; // percentage (0-100)
+  allocation: number;
   sector: string;
   value: number;
 }
@@ -13,56 +118,49 @@ export interface Holding {
   name: string;
   type: AssetType;
   ticker: string;
+  isin?: string;
+  folioNumber?: string;
   quantity: number;
   currentValue: number;
   avgPrice: number;
   currentPrice: number;
-  returns: number; // percentage (e.g. +18.4)
-  returnsValue: number; // absolute value (e.g. +45000)
-  allocation: number; // percentage of portfolio
-  expenseRatio?: number; // e.g. 0.012 (1.2% fee)
+  returns: number;
+  returnsValue: number;
+  allocation: number;
+  expenseRatio?: number;
+  planType?: "Direct" | "Regular";
   riskGrade: "High" | "Medium" | "Low";
   sector: string;
-  underlyingHoldings?: StockExposure[]; // For mutual funds look-through
+  conglomerate?: string;
+  nomineeStatus?: "Verified" | "Missing" | "Action Required";
+  cagr3Y?: number;
+  alpha?: number;
+  beta?: number;
+  sipActive?: boolean;
+  sipAmount?: number;
+  underlyingHoldings?: StockExposure[];
 }
 
 export interface ExposureAlert {
   id: string;
   type: "Danger" | "Warning" | "Success" | "Info";
+  category: "Concentration" | "Fee" | "Overlap" | "Nominee" | "Conglomerate" | "StyleDrift" | "PanicGuard";
   title: string;
   description: string;
+  impactScore?: string;
   date: string;
-}
-
-export interface ActivityLog {
-  id: string;
-  type: "Buy" | "Sell" | "Dividend" | "Rebalance";
-  assetName: string;
-  quantity?: number;
-  amount: number;
-  date: string;
-  status: "Completed" | "Pending";
-}
-
-export interface AIRecommendation {
-  id: string;
-  type: "Fee" | "Overlap" | "Concentration" | "Nominee" | "Tax";
-  severity: "High" | "Medium" | "Low";
-  title: string;
-  description: string;
-  actionText: string;
-  impactValue?: string;
-  link: string;
 }
 
 export interface CrashScenario {
   id: string;
   name: string;
   dateRange: string;
-  marketDrop: number; // e.g. -38
-  portfolioImpact: number; // e.g. -24
+  marketDrop: number;
+  portfolioImpact: number;
+  estimatedLossRupees: number;
   recoveryMonths: number;
   description: string;
+  historicalNiftyPoints?: { month: string; nifty: number; portfolio: number }[];
 }
 
 export interface PeerBenchmark {
@@ -70,6 +168,7 @@ export interface PeerBenchmark {
   portfolio: number;
   average: number;
   top10Percent: number;
+  unit: string;
 }
 
 export interface CapitalGainsItem {
@@ -82,28 +181,154 @@ export interface CapitalGainsItem {
   gainAmount: number;
   taxRate: number;
   taxOwed: number;
+  exitLoadApplicable: boolean;
+  exitLoadFee: number;
+  recommendation: "Harvest Loss Now" | "Hold till LTCG" | "Sell Partial under Exemption";
 }
 
 export interface NomineeRecord {
   id: string;
-  name: string;
-  relationship: "Spouse" | "Child" | "Parent" | "Sibling" | "Other";
-  allocation: number; // percentage
+  accountName: string;
+  accountType: "Demat (Zerodha)" | "Demat (Groww)" | "Mutual Fund (CAMS)" | "Mutual Fund (KFintech)" | "Bank FD" | "EPFO";
+  folioNumber: string;
+  nomineeName: string;
+  relationship: "Spouse" | "Child" | "Parent" | "Sibling" | "Unassigned";
+  allocation: number;
   status: "Verified" | "Pending" | "Action Required";
   verificationMethod?: string;
+  lastUpdated: string;
+}
+
+export interface ConglomerateGroupData {
+  id: string;
+  groupName: string;
+  totalValue: number;
+  totalPercentage: number;
+  riskStatus: "High Alert" | "Elevated" | "Normal";
+  companies: {
+    name: string;
+    ticker: string;
+    value: number;
+    percentage: number;
+    heldVia: string;
+  }[];
+}
+
+export interface SIPHealthItem {
+  id: string;
+  fundName: string;
+  ticker: string;
+  monthlyAmount: number;
+  totalInvested: number;
+  currentValue: number;
+  rolling3YReturn: number;
+  benchmarkReturn: number;
+  alpha: number;
+  grade: "A+" | "A" | "B" | "C" | "D";
+  status: "Outperformer" | "Consistent" | "Underperformer";
+  recommendation: string;
+  suggestedSwitch?: {
+    replacementFund: string;
+    replacementTicker: string;
+    terDifference: string;
+    historicalAlphaDiff: string;
+  };
+}
+
+export interface FamilyMember {
+  id: string;
+  name: string;
+  relation: "Self" | "Spouse" | "Father" | "Mother" | "Child";
+  panMasked: string;
+  portfolioValue: number;
+  totalGain: number;
+  gainPercent: number;
+  healthScore: number;
+  holdingsCount: number;
+  topStock: string;
+  color: string;
+}
+
+export interface IPONFOCheckItem {
+  id: string;
+  name: string;
+  type: "IPO" | "NFO";
+  issuePrice: string;
+  issueDate: string;
+  category: string;
+  overlapPercent: number;
+  overlappingHoldings: {
+    holdingName: string;
+    viaFund: string;
+    existingExposurePercent: number;
+  }[];
+  verdict: "High Duplicate Exposure" | "Moderate Overlap" | "Unique / Clean Addition";
+  rationale: string;
+}
+
+export interface MacroStressConfig {
+  crudePrice: number;
+  repoRate: number;
+  usdInr: number;
+  itSectorShock: number;
+  bankingSectorShock: number;
+}
+
+export interface DividendEvent {
+  id: string;
+  companyName: string;
+  ticker: string;
+  exDate: string;
+  recordDate: string;
+  payoutDate: string;
+  dividendPerShare: number;
+  sharesHeld: number;
+  totalDividend: number;
+  dividendYield: number;
+  status: "Announced" | "Estimated" | "Credited";
+}
+
+export interface NewsImpactItem {
+  id: string;
+  headline: string;
+  source: string;
+  timestamp: string;
+  ticker: string;
+  companyName: string;
+  sector: string;
+  sentiment: "Bullish" | "Bearish" | "Neutral";
+  companyImpactPercent: number;
+  portfolioImpactPercent: number;
+  summary: string;
+  actionNudge: string;
 }
 
 export interface ClientProfile {
   id: string;
   name: string;
   email: string;
+  phone?: string;
   avatar?: string;
   portfolioValue: number;
   gainLoss: number;
   gainLossPercent: number;
-  riskScore: number; // 300-900 scale
-  hhiScore: number; // Herfindahl-Hirschman Index
+  riskScore: number;
+  hhiScore: number;
   diversificationGrade: "Excellent" | "Good" | "Average" | "Poor";
   feeBleedAnnually: number;
   nomineeStatus: "Complete" | "Partial" | "Missing";
+  lastAuditDate: string;
+}
+
+export interface AdvisorSettings {
+  firmName: string;
+  advisorName: string;
+  arnNumber: string;
+  sebiReg: string;
+  email: string;
+  phone: string;
+  website: string;
+  brandPrimaryColor: string;
+  logoText: string;
+  disclaimer: string;
 }

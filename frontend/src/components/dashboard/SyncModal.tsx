@@ -1,0 +1,291 @@
+"use client";
+
+import React, { useState } from "react";
+import { 
+  X, 
+  Smartphone, 
+  FileText, 
+  ShieldCheck, 
+  ArrowRight, 
+  Lock, 
+  Sparkles, 
+  RefreshCw,
+  FileCheck2,
+  Building2,
+  CheckCircle2
+} from "lucide-react";
+import { usePortfolioStore } from "@/store/portfolioStore";
+import { Button } from "@/components/ui/Button";
+import { IconButton } from "@/components/ui/IconButton";
+import { useDialogA11y } from "@/lib/useDialogA11y";
+
+export function SyncModal() {
+  const { 
+    isSyncModalOpen, 
+    closeSyncModal, 
+    syncMethod, 
+    syncProgress, 
+    syncStep, 
+    isSyncing, 
+    startSync 
+  } = usePortfolioStore();
+
+  const [activeTab, setActiveTab] = useState<"OTP" | "CAS">(syncMethod || "OTP");
+  const [mobileNumber, setMobileNumber] = useState("9876543210");
+  const [panNumber, setPanNumber] = useState("ABCDE1234F");
+  const [casPassword, setCasPassword] = useState("");
+  const [dragOver, setDragOver] = useState(false);
+  const [fileName] = useState("CAS_Statement_CAMS_KFintech_July2026.pdf");
+  const [fieldErrors, setFieldErrors] = useState<{ mobile?: string; pan?: string }>({});
+
+  const dialogRef = useDialogA11y(isSyncModalOpen, () => { if (!isSyncing) closeSyncModal(); });
+
+  if (!isSyncModalOpen) return null;
+
+  const validateOtpFields = () => {
+    const errors: { mobile?: string; pan?: string } = {};
+    if (!/^[6-9]\d{9}$/.test(mobileNumber.trim())) {
+      errors.mobile = "Enter a valid 10-digit Indian mobile number.";
+    }
+    if (!/^[A-Z]{5}\d{4}[A-Z]$/.test(panNumber.trim())) {
+      errors.pan = "PAN must be in the format ABCDE1234F.";
+    }
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleStart = () => {
+    if (activeTab === "OTP" && !validateOtpFields()) return;
+    startSync(activeTab);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-in fade-in duration-150 motion-reduce:animate-none">
+      <div 
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sync-modal-title"
+        tabIndex={-1}
+        className="relative w-full max-w-xl rounded-2xl border border-border bg-[var(--card)] p-6 shadow-2xl shadow-black/60 text-foreground overflow-hidden outline-none"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Modal Header */}
+        <div className="flex items-center justify-between pb-4 border-b border-border">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-primary/10 text-primary border border-primary/20 flex items-center justify-center font-semibold">
+              <Sparkles className="w-5 h-5" strokeWidth={1.75} />
+            </div>
+            <div>
+              <h2 id="sync-modal-title" className="text-base font-semibold tracking-tight text-foreground">Connect Live Portfolio</h2>
+              <p className="text-xs text-muted-foreground">Instant RBI Account Aggregator & Smart CAS Decryptor</p>
+            </div>
+          </div>
+          <IconButton
+            onClick={closeSyncModal}
+            disabled={isSyncing}
+            aria-label="Close sync dialog"
+          >
+            <X className="w-5 h-5" />
+          </IconButton>
+        </div>
+
+        {/* Sync Mode Switcher */}
+        {!isSyncing && (
+          <div className="grid grid-cols-2 gap-2 mt-5 p-1 bg-[var(--background-elevated)] rounded-xl border border-border/70">
+            <button
+              onClick={() => setActiveTab("OTP")}
+              className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                activeTab === "OTP" 
+                  ? "bg-primary text-white shadow-sm" 
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Smartphone className="w-4 h-4" strokeWidth={1.75} />
+              <span>1-OTP Fetch (AA & RTA)</span>
+            </button>
+            <button
+              onClick={() => setActiveTab("CAS")}
+              className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                activeTab === "CAS" 
+                  ? "bg-primary text-white shadow-sm" 
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <FileText className="w-4 h-4" strokeWidth={1.75} />
+              <span>Smart CAS PDF Upload</span>
+            </button>
+          </div>
+        )}
+
+        {/* Active View: OTP Flow */}
+        {!isSyncing && activeTab === "OTP" && (
+          <div className="mt-5 space-y-4">
+            <div className="p-3.5 rounded-xl border border-[var(--positive)]/20 bg-[var(--positive)]/10 flex items-start gap-3">
+              <ShieldCheck className="w-5 h-5 text-[var(--positive)] shrink-0 mt-0.5" strokeWidth={1.75} />
+              <div className="text-xs">
+                <p className="font-semibold text-[var(--positive)] font-sans">100% RBI & SEBI Compliant Single-OTP Sync</p>
+                <p className="text-muted-foreground mt-0.5 leading-relaxed font-sans">
+                  Fetches all your Direct Stocks (NSDL/CDSL), Mutual Funds (CAMS/KFintech), Bank FDs, and EPF automatically without uploading any manual statements.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-semibold text-muted-foreground mb-1.5 font-sans">Registered Mobile Number</label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-mono text-muted-foreground">+91</span>
+                  <input 
+                    type="text" 
+                    value={mobileNumber}
+                    onChange={(e) => { setMobileNumber(e.target.value); if (fieldErrors.mobile) setFieldErrors((f) => ({ ...f, mobile: undefined })); }}
+                    aria-invalid={!!fieldErrors.mobile}
+                    aria-describedby={fieldErrors.mobile ? "mobile-error" : undefined}
+                    className={`w-full h-10 pl-11 pr-3 bg-[var(--background-elevated)] border rounded-xl text-xs font-mono text-foreground outline-none transition-colors tabular-nums ${fieldErrors.mobile ? "border-[var(--negative)] focus:border-[var(--negative)]" : "border-border focus:border-primary/60"}`}
+                    placeholder="Enter 10-digit mobile number"
+                  />
+                </div>
+                {fieldErrors.mobile && (
+                  <p id="mobile-error" role="alert" className="mt-1 text-[11px] text-[var(--negative)]">{fieldErrors.mobile}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-muted-foreground mb-1.5 font-sans">PAN Card Number</label>
+                <input 
+                  type="text" 
+                  value={panNumber}
+                  onChange={(e) => { setPanNumber(e.target.value.toUpperCase()); if (fieldErrors.pan) setFieldErrors((f) => ({ ...f, pan: undefined })); }}
+                  aria-invalid={!!fieldErrors.pan}
+                  aria-describedby={fieldErrors.pan ? "pan-error" : undefined}
+                  className={`w-full h-10 px-3 bg-[var(--background-elevated)] border rounded-xl text-xs font-mono uppercase text-foreground outline-none transition-colors ${fieldErrors.pan ? "border-[var(--negative)] focus:border-[var(--negative)]" : "border-border focus:border-primary/60"}`}
+                  placeholder="ABCDE1234F"
+                  maxLength={10}
+                />
+                {fieldErrors.pan && (
+                  <p id="pan-error" role="alert" className="mt-1 text-[11px] text-[var(--negative)]">{fieldErrors.pan}</p>
+                )}
+              </div>
+            </div>
+
+            <div className="pt-2 flex items-center justify-between text-[11px] text-muted-foreground font-sans">
+              <div className="flex items-center gap-1.5">
+                <Building2 className="w-3.5 h-3.5 text-primary" strokeWidth={1.75} />
+                <span>Powered by Setu / Finvu AA & MF Central</span>
+              </div>
+              <span className="text-[var(--positive)] font-medium font-mono text-[10px]">256-Bit SSL</span>
+            </div>
+
+            <Button onClick={handleStart} className="w-full h-11 text-xs font-semibold gap-2 mt-2">
+              <span>Send Secure OTP & Sync Everything</span>
+              <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+            </Button>
+          </div>
+        )}
+
+        {/* Active View: CAS PDF Upload */}
+        {!isSyncing && activeTab === "CAS" && (
+          <div className="mt-5 space-y-4">
+            <div className="p-3.5 rounded-xl border border-[var(--info)]/20 bg-[var(--info)]/10 flex items-start gap-3">
+              <FileCheck2 className="w-5 h-5 text-[var(--info)] shrink-0 mt-0.5" strokeWidth={1.75} />
+              <div className="text-xs">
+                <p className="font-semibold text-[var(--info)] font-sans">Zero-Error Smart CAS PDF Parser</p>
+                <p className="text-muted-foreground mt-0.5 leading-relaxed font-sans">
+                  Upload password-protected CAMS, KFintech, or NSDL Consolidated Account Statement. Decrypts and aggregates all folios locally in real-time.
+                </p>
+              </div>
+            </div>
+
+            <div 
+              onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+              onDragLeave={() => setDragOver(false)}
+              onDrop={(e) => { e.preventDefault(); setDragOver(false); }}
+              className={`p-6 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center text-center transition-all ${
+                dragOver ? "border-primary bg-primary/10" : "border-border bg-[var(--background-elevated)] hover:border-primary/40"
+              }`}
+            >
+              <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary border border-primary/20 flex items-center justify-center mb-3">
+                <FileText className="w-6 h-6" strokeWidth={1.75} />
+              </div>
+              <p className="text-xs font-semibold text-foreground font-sans">{fileName}</p>
+              <p className="text-[11px] text-muted-foreground mt-1 font-sans">Drag & drop your CAS PDF here or click to browse</p>
+              <span className="mt-2 text-[10px] text-primary/80 bg-primary/10 px-2 py-0.5 rounded-md font-mono border border-primary/20">
+                CAMS / KFIN / CDSL PDF Supported
+              </span>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-muted-foreground mb-1.5 flex items-center justify-between font-sans">
+                <span>CAS PDF Password (Usually PAN or DoB)</span>
+                <span className="text-[10px] text-muted-foreground font-mono">Auto-detected if blank</span>
+              </label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" strokeWidth={1.75} />
+                <input 
+                  type="password" 
+                  value={casPassword}
+                  onChange={(e) => setCasPassword(e.target.value)}
+                  className="w-full h-10 pl-9 pr-3 bg-[var(--background-elevated)] border border-border rounded-xl text-xs font-mono text-foreground focus:border-primary/60 outline-none"
+                  placeholder="e.g. ABCDE1234F or DDMMYYYY"
+                />
+              </div>
+            </div>
+
+            <Button onClick={handleStart} className="w-full h-11 text-xs font-semibold gap-2 mt-2">
+              <span>Decrypt & Parse Statement Now</span>
+              <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+            </Button>
+          </div>
+        )}
+
+        {/* Live Multi-Step Syncing Animation */}
+        {isSyncing && (
+          <div className="py-8 px-4 text-center space-y-6 animate-in fade-in duration-300">
+            <div className="relative mx-auto w-20 h-20">
+              {syncProgress < 100 ? (
+                <>
+                  <div className="w-20 h-20 rounded-full border-4 border-primary/20 border-t-primary animate-spin" />
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <RefreshCw className="w-7 h-7 text-primary animate-pulse" />
+                  </div>
+                </>
+              ) : (
+                <div className="w-20 h-20 rounded-full bg-[var(--positive-soft)] border-2 border-[var(--positive)]/40 flex items-center justify-center animate-fade-in-up">
+                  <CheckCircle2 className="w-10 h-10 text-[var(--positive)]" strokeWidth={1.75} />
+                </div>
+              )}
+            </div>
+
+            <div>
+              <h3 className="text-base font-semibold text-foreground font-sans">
+                {syncProgress < 100 ? "Syncing Portfolio Assets..." : "Diagnostic Generation Complete!"}
+              </h3>
+              <p className="text-xs text-primary font-medium mt-1 font-mono">{syncStep}</p>
+            </div>
+
+            <div className="space-y-2 max-w-md mx-auto">
+              <div className="flex justify-between text-[11px] font-mono text-muted-foreground">
+                <span>Sync Progress</span>
+                <span className="text-primary font-semibold tabular-nums">{syncProgress}%</span>
+              </div>
+              <div className="w-full h-2.5 bg-[var(--background-elevated)] rounded-full overflow-hidden p-0.5 border border-border/70">
+                <div 
+                  className="h-full bg-primary rounded-full transition-all duration-500 shadow-sm"
+                  style={{ width: `${syncProgress}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-4 gap-2 pt-2 max-w-sm mx-auto text-[10px] text-muted-foreground font-medium font-sans">
+              <span className={syncProgress >= 25 ? "text-[var(--positive)]" : ""}>✓ AA Sync</span>
+              <span className={syncProgress >= 50 ? "text-[var(--positive)]" : ""}>✓ Stocks</span>
+              <span className={syncProgress >= 75 ? "text-[var(--positive)]" : ""}>✓ Mutual Funds</span>
+              <span className={syncProgress >= 100 ? "text-[var(--positive)]" : ""}>✓ AMFI X-Ray</span>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -7,14 +7,14 @@ interface ThemeState {
 }
 
 export const useThemeStore = create<ThemeState>((set) => {
-  // Initialize from localStorage on client side
+  // Initialize from localStorage on client side (Default is always Dark)
   const getInitialTheme = (): "light" | "dark" => {
     if (typeof window !== "undefined") {
       const stored = localStorage.getItem("theme");
-      if (stored === "light" || stored === "dark") {
-        return stored;
+      if (stored === "light") {
+        return "light";
       }
-      return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      return "dark"; // Default is ALWAYS dark
     }
     return "dark"; // Default
   };
@@ -23,10 +23,10 @@ export const useThemeStore = create<ThemeState>((set) => {
   
   // Set the initial class on load
   if (typeof window !== "undefined") {
-    if (initialTheme === "dark") {
-      document.documentElement.classList.add("dark");
-    } else {
+    if (initialTheme === "light") {
       document.documentElement.classList.remove("dark");
+    } else {
+      document.documentElement.classList.add("dark");
     }
   }
 
