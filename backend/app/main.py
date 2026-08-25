@@ -10,6 +10,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.api.health import router as health_router
 from app.api.portfolio import router as portfolio_router
+from app.api.imports import router as imports_router
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,7 @@ app.add_middleware(
 )
 app.include_router(health_router, prefix="/api", tags=["health"])
 app.include_router(portfolio_router, prefix="/api", tags=["portfolios"])
+app.include_router(imports_router, prefix="/api", tags=["imports"])
 
 
 def error_response(status_code: int, code: str, message: str) -> JSONResponse:
@@ -44,6 +46,8 @@ async def validation_error_handler(_: Request, __: RequestValidationError) -> JS
 
 @app.exception_handler(HTTPException)
 async def http_error_handler(_: Request, error: HTTPException) -> JSONResponse:
+    if isinstance(error.detail, dict) and "code" in error.detail:
+        return error_response(error.status_code, error.detail["code"], error.detail.get("message", "Request failed"))
     messages = {401: ("UNAUTHORIZED", "Authentication required"), 403: ("FORBIDDEN", "You do not have access to this resource"), 404: ("PORTFOLIO_NOT_FOUND", "Portfolio not found"), 503: ("DATABASE_ERROR", "Database unavailable")}
     code, message = messages.get(error.status_code, ("REQUEST_ERROR", "Request failed"))
     return error_response(error.status_code, code, message)

@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict
 
@@ -12,6 +12,7 @@ class ImportRecordResponse(BaseModel):
     id: uuid.UUID
     source_type: SourceType
     file_name: str | None
+    statement_period: date | None
     status: ImportStatus
     created_at: datetime
     completed_at: datetime | None
