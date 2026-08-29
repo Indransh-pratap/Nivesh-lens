@@ -1,3 +1,4 @@
+from app.models.cas_otp import CasOtpSession
 from app.models.holding import Holding
 from app.models.import_record import ImportRecord
 from app.models.portfolio import Portfolio
@@ -15,6 +16,7 @@ from app.models.market_data import (
 )
 
 __all__ = [
+    "CasOtpSession",
     "Holding",
     "ImportRecord",
     "Portfolio",
@@ -29,4 +31,3 @@ __all__ = [
     "SchemeHolding",
     "DataSyncRecord",
 ]
-

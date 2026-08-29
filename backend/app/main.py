@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 
+from app.api.cas import router as cas_router
 from app.api.health import router as health_router
 from app.api.portfolio import router as portfolio_router
 from app.api.imports import router as imports_router
@@ -33,7 +34,7 @@ app.add_middleware(
 app.include_router(health_router, prefix="/api", tags=["health"])
 app.include_router(portfolio_router, prefix="/api", tags=["portfolios"])
 app.include_router(imports_router, prefix="/api", tags=["imports"])
-
+app.include_router(cas_router)
 
 def error_response(status_code: int, code: str, message: str) -> JSONResponse:
     return JSONResponse(status_code=status_code, content={"error": {"code": code, "message": message}})

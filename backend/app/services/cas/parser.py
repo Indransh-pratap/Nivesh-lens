@@ -3,7 +3,7 @@ from datetime import datetime
 
 from app.services.cas.detector import CASFormat
 from app.services.cas.models import RawCASData, RawHolding, RawTransaction
-
+from app.services.cas.parsers.cams import parse_cams
 
 class CasParseError(Exception):
     code = "CAS_PARSE_FAILED"
@@ -37,18 +37,64 @@ def _period(text: str):
 
 
 def parse_cas(text: str, cas_format: CASFormat) -> RawCASData:
-    """Extract common labelled CAS rows. Format-specific parsers can be registered here later."""
+    if cas_format == CASFormat.CAMS and "FOLIO NO" in text.upper():
+        try:
+            return parse_cams(text)
+        except ValueError as error:
+            raise CasParseError(str(error)) from error
+
+    # Keep the existing generic parser for formats
+    # that do not have a dedicated parser yet.
     holdings: list[RawHolding] = []
-    # Works with labelled text emitted by common RTA PDFs and deliberately avoids positional table guesses.
-    pattern = re.compile(rf"(?:SCHEME|FUND|SECURITY)\s*[:\-]\s*(?P<name>[^\n]+)(?P<body>.*?)(?=(?:SCHEME|FUND|SECURITY)\s*[:\-]|\Z)", re.I | re.S)
+
+    pattern = re.compile(
+        rf"(?:SCHEME|FUND|SECURITY)\s*[:\-]\s*"
+        rf"(?P<name>[^\n]+)"
+        rf"(?P<body>.*?)"
+        rf"(?=(?:SCHEME|FUND|SECURITY)\s*[:\-]|\Z)",
+        re.I | re.S,
+    )
+
     for match in pattern.finditer(text):
         name = " ".join(match.group("name").split())
         body = match.group("body")
-        isin_match = re.search(rf"ISIN\s*[:\-]?\s*{_ISIN}", body, re.I)
+
+        isin_match = re.search(
+            rf"ISIN\s*[:\-]?\s*{_ISIN}",
+            body,
+            re.I,
+        )
+
         units = _value(body, r"(?:UNITS?|BALANCE)")
-        current_value = _value(body, r"(?:CURRENT\s+VALUE|MARKET\s+VALUE|VALUATION)")
+        current_value = _value(
+            body,
+            r"(?:CURRENT\s+VALUE|MARKET\s+VALUE|VALUATION)",
+        )
+
         if name and units and current_value:
-            holdings.append(RawHolding(name=name, isin=isin_match.group(1) if isin_match else None, units=units, average_cost=_value(body, r"(?:AVERAGE\s+(?:COST|PRICE)|COST\s+PRICE)"), current_value=current_value, current_price=_value(body, r"(?:NAV|CURRENT\s+PRICE)")))
+            holdings.append(
+                RawHolding(
+                    name=name,
+                    isin=isin_match.group(1) if isin_match else None,
+                    units=units,
+                    average_cost=_value(
+                        body,
+                        r"(?:AVERAGE\s+(?:COST|PRICE)|COST\s+PRICE)",
+                    ),
+                    current_value=current_value,
+                    current_price=_value(
+                        body,
+                        r"(?:NAV|CURRENT\s+PRICE)",
+                    ),
+                )
+            )
+
     if not holdings:
         raise CasParseError("No supported holding records found")
-    return RawCASData(format_name=cas_format.value, holdings=holdings, transactions=[], statement_period=_period(text))
+
+    return RawCASData(
+        format_name=cas_format.value,
+        holdings=holdings,
+        transactions=[],
+        statement_period=_period(text),
+    )

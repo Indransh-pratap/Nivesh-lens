@@ -15,6 +15,12 @@ class RawHolding:
     current_value: str | None
     current_price: str | None = None
 
+    # CAS metadata
+    asset_type: AssetType = AssetType.MUTUAL_FUND
+    folio_number: str | None = None
+    amc: str | None = None
+    advisor: str | None = None
+
 
 @dataclass(frozen=True)
 class RawTransaction:
@@ -24,6 +30,12 @@ class RawTransaction:
     transaction_date: str
     units: str
     amount: str
+
+    # CAS metadata
+    folio_number: str | None = None
+    asset_type: AssetType = AssetType.MUTUAL_FUND
+    nav: str | None = None
+    unit_balance: str | None = None
 
 
 @dataclass(frozen=True)
@@ -43,6 +55,9 @@ class CanonicalHolding:
     average_cost: Decimal
     current_value: Decimal
     current_price: Decimal
+    folio_number: str | None = None
+    amc: str | None = None
+    advisor: str | None = None
 
 
 @dataclass(frozen=True)
