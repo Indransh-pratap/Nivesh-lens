@@ -1,6 +1,8 @@
 "use client";
 
 import React, { useState, useCallback, useRef } from "react";
+import { useRouter, usePathname } from "next/navigation";
+import Link from "next/link";
 import { 
   FileText, 
   UploadCloud, 
@@ -17,16 +19,23 @@ import {
 import { Button } from "@/components/ui/Button";
 import { IconButton } from "@/components/ui/IconButton";
 import { useToastStore } from "@/store/toastStore";
+import { usePortfolioStore } from "@/store/portfolioStore";
+import { authClient } from "@/lib/auth-client";
 
 interface CasPdfUploaderProps {
   onSuccess?: (parsedFoliosCount: number) => void;
   className?: string;
+  hideHeader?: boolean;
 }
 
 export const CasPdfUploader = React.memo(function CasPdfUploader({
   onSuccess,
-  className = ""
+  className = "",
+  hideHeader = false
 }: CasPdfUploaderProps) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const { data: session } = authClient.useSession();
   const [dragActive, setDragActive] = useState(false);
   const [file, setFile] = useState<File | null>(null);
   const [password, setPassword] = useState("");
@@ -34,8 +43,38 @@ export const CasPdfUploader = React.memo(function CasPdfUploader({
   const [processStep, setProcessStep] = useState("");
   const [progressPercent, setProgressPercent] = useState(0);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [result, setResult] = useState<{ holdingsCount: number; transactionsCount: number } | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
+  const [authRequired, setAuthRequired] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const resetNativeFileInput = useCallback(() => {
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }, []);
+
+  const selectFile = useCallback((selectedFile: File) => {
+    if (!selectedFile.name.toLowerCase().endsWith(".pdf")) {
+      setErrorMsg("Please upload a valid PDF file (CAMS, KFintech, or NSDL CAS).");
+      return;
+    }
+
+    setFile(selectedFile);
+    setErrorMsg("");
+    setAuthRequired(false);
+    setIsSuccess(false);
+    setResult(null);
+    setProgressPercent(0);
+    setProcessStep("");
+    resetNativeFileInput();
+  }, [resetNativeFileInput]);
+
+  const openFilePicker = useCallback(() => {
+    if (isProcessing) return;
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+      fileInputRef.current.click();
+    }
+  }, [isProcessing]);
 
   // Handle drag events
   const handleDrag = useCallback((e: React.DragEvent) => {
@@ -53,78 +92,140 @@ export const CasPdfUploader = React.memo(function CasPdfUploader({
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    setErrorMsg("");
-
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const droppedFile = e.dataTransfer.files[0];
-      if (!droppedFile.name.toLowerCase().endsWith(".pdf")) {
-        setErrorMsg("Please upload a valid PDF file (CAMS, KFintech, or NSDL CAS).");
-        return;
-      }
-      setFile(droppedFile);
+      selectFile(e.dataTransfer.files[0]);
     }
-  }, []);
+  }, [selectFile]);
 
   // Handle file select via browse button
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    setErrorMsg("");
-    if (e.target.files && e.target.files[0]) {
-      const selectedFile = e.target.files[0];
-      if (!selectedFile.name.toLowerCase().endsWith(".pdf")) {
-        setErrorMsg("Please upload a valid PDF file (CAMS, KFintech, or NSDL CAS).");
-        return;
-      }
-      setFile(selectedFile);
-    }
-  }, []);
+    const selectedFile = e.target.files?.[0];
+    if (selectedFile) selectFile(selectedFile);
+    if (e.target) e.target.value = "";
+  }, [selectFile]);
 
-  // Simulated client-side CAS Decryption & Extraction pipeline
   const handleDecryptAndParse = useCallback(async () => {
     if (!file) {
       setErrorMsg("Please select or drop your CAS PDF file.");
       return;
     }
 
+    // Check auth state before attempting upload
+    let currentUser = session?.user;
+    if (!currentUser) {
+      try {
+        const currentSession = await authClient.getSession();
+        currentUser = currentSession.data?.user;
+      } catch {
+        currentUser = undefined;
+      }
+    }
+
+    if (!currentUser) {
+      setAuthRequired(true);
+      setErrorMsg("Please log in to import your portfolio.");
+      return;
+    }
+
+    setAuthRequired(false);
     setIsProcessing(true);
     setErrorMsg("");
-    setProgressPercent(15);
-    setProcessStep("Loading PDF cryptographic signature into secure client memory...");
+    setProgressPercent(20);
+    setProcessStep("Uploading and decrypting your CAS securely...");
 
-    const steps = [
-      { progress: 35, step: "Validating passphrase against AES-256 PDF encryption layer..." },
-      { progress: 60, step: "Extracting folios across CAMS, KFintech & Demat records..." },
-      { progress: 85, step: "Cross-referencing AMFI NAV endpoints and monthly asset sheets..." },
-      { progress: 100, step: "CAS Parsing complete! Extracted 8 Folios & 50 Transactions." }
-    ];
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("password", password);
 
-    for (const s of steps) {
-      await new Promise((res) => setTimeout(res, 550));
-      setProgressPercent(s.progress);
-      setProcessStep(s.step);
+      const response = await fetch("/api/portfolio/imports/cas", {
+        method: "POST",
+        body: form,
+        credentials: "include",
+      });
+
+      if (response.status === 401) {
+        setAuthRequired(true);
+        throw new Error("Please log in to import your portfolio.");
+      }
+      if (response.status === 403) {
+        throw new Error("You don't have permission to import this portfolio.");
+      }
+      if (response.status >= 500) {
+        throw new Error("Server error while processing the statement. Please try again.");
+      }
+
+      const payload = await response.json().catch(() => ({})) as {
+        holdings_count?: number;
+        transactions_count?: number;
+        holdings?: any[];
+        error?: { code?: string; message?: string };
+        detail?: { code?: string; message?: string } | string;
+      };
+
+      if (!response.ok) {
+        const errDetail = typeof payload.detail === "object" ? payload.detail : null;
+        const code = payload.error?.code || errDetail?.code;
+        if (code === "WRONG_PASSWORD") {
+          throw new Error("Could not decrypt the CAS PDF. Please check the password.");
+        }
+        if (code === "EMPTY_CAS") {
+          throw new Error("No investment records were found in this CAS statement.");
+        }
+        if (code === "UNSUPPORTED_CAS") {
+          throw new Error("Unsupported CAS statement format.");
+        }
+        if (code === "INVALID_PDF") {
+          throw new Error("Please upload a valid PDF file (CAMS, KFintech, or NSDL CAS).");
+        }
+        const message = payload.error?.message || (typeof payload.detail === "string" ? payload.detail : errDetail?.message);
+        throw new Error(message ?? "Unable to parse this CAS statement.");
+      }
+
+      const holdingsCount = payload.holdings_count ?? 0;
+      const transactionsCount = payload.transactions_count ?? 0;
+
+      if (holdingsCount === 0 && (!payload.holdings || payload.holdings.length === 0)) {
+        throw new Error("No investment records were found in this CAS statement.");
+      }
+
+      if (payload.holdings && payload.holdings.length > 0) {
+        usePortfolioStore.getState().setHoldings(payload.holdings);
+      }
+
+      setProgressPercent(100);
+      setProcessStep("CAS parsed and portfolio updated.");
+      setResult({ holdingsCount, transactionsCount });
+      setIsSuccess(true);
+
+      useToastStore.getState().addToast({
+        variant: "success",
+        title: "CAS statement parsed",
+        description: `${holdingsCount} holdings and ${transactionsCount} transactions imported.`,
+      });
+
+      onSuccess?.(holdingsCount);
+    } catch (error) {
+      setProgressPercent(0);
+      setProcessStep("");
+      setErrorMsg(error instanceof Error ? error.message : "Unable to parse this CAS statement.");
+    } finally {
+      setIsProcessing(false);
     }
-
-    await new Promise((res) => setTimeout(res, 400));
-    setIsProcessing(false);
-    setIsSuccess(true);
-    useToastStore.getState().addToast({
-      variant: "success",
-      title: "CAS statement parsed",
-      description: "8 folios and 50 transactions extracted successfully.",
-    });
-    if (onSuccess) {
-      onSuccess(8);
-    }
-  }, [file, onSuccess]);
+  }, [file, onSuccess, password, session?.user]);
 
   const handleReset = useCallback(() => {
     setFile(null);
     setPassword("");
     setIsProcessing(false);
     setIsSuccess(false);
+    setResult(null);
     setErrorMsg("");
+    setAuthRequired(false);
     setProgressPercent(0);
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  }, []);
+    setProcessStep("");
+    resetNativeFileInput();
+  }, [resetNativeFileInput]);
 
   return (
     <div className={`rounded-2xl border border-border bg-[var(--card)] p-6 shadow-xl shadow-black/30 text-foreground relative overflow-hidden ${className}`}>
@@ -283,11 +384,38 @@ export const CasPdfUploader = React.memo(function CasPdfUploader({
             </div>
           )}
 
-          {/* Error Banner */}
+          {/* Error Banner with Login CTA */}
           {errorMsg && (
-            <div className="p-3.5 rounded-xl bg-[var(--negative)]/10 border border-[var(--negative)]/20 text-xs text-[var(--negative)] flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0" strokeWidth={1.75} />
-              <span>{errorMsg}</span>
+            <div className={`p-4 rounded-xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+              authRequired 
+                ? "bg-primary/10 border-primary/30 text-foreground" 
+                : "bg-[var(--negative)]/10 border-[var(--negative)]/20 text-[var(--negative)]"
+            }`}>
+              <div className="flex items-center gap-2.5">
+                <AlertCircle className={`w-4 h-4 shrink-0 ${authRequired ? "text-primary" : "text-[var(--negative)]"}`} strokeWidth={1.75} />
+                <span className="font-medium">{errorMsg}</span>
+              </div>
+              {authRequired && (
+                <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      const next = typeof window !== "undefined" ? window.location.pathname : "/dashboard";
+                      router.push(`/login?next=${encodeURIComponent(next)}`);
+                    }}
+                    className="h-8 text-xs font-bold px-3 gap-1 shadow-sm"
+                  >
+                    <span>Log In</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </Button>
+                  <Link
+                    href="/signup"
+                    className="text-xs text-muted-foreground hover:text-foreground font-semibold px-2 py-1"
+                  >
+                    Sign Up
+                  </Link>
+                </div>
+              )}
             </div>
           )}
 
@@ -295,7 +423,7 @@ export const CasPdfUploader = React.memo(function CasPdfUploader({
           <div className="pt-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px] text-muted-foreground border-t border-border/70">
             <span className="flex items-center gap-1.5">
               <KeyRound className="w-3.5 h-3.5 text-primary" strokeWidth={1.75} />
-              <span>Passwords are never logged or stored. Decryption executes locally in memory.</span>
+              <span>Passwords are never logged or stored. Decryption executes securely in memory.</span>
             </span>
             <span className="font-mono text-[var(--positive)] text-[10px]">256-Bit SSL Sandboxed</span>
           </div>
@@ -310,7 +438,7 @@ export const CasPdfUploader = React.memo(function CasPdfUploader({
           <div>
             <h4 className="text-base font-bold text-foreground">CAS PDF Successfully Parsed!</h4>
             <p className="text-xs text-muted-foreground mt-1">
-              Extracted <strong className="text-foreground font-mono tabular-nums">8 Mutual Fund Folios</strong>, <strong className="text-foreground font-mono tabular-nums">4 Direct Equity Holdings</strong>, and <strong className="text-foreground font-mono tabular-nums">50 Historical Transactions</strong>.
+              Extracted <strong className="text-foreground font-mono tabular-nums">{result?.holdingsCount ?? 0} Holdings</strong> and <strong className="text-foreground font-mono tabular-nums">{result?.transactionsCount ?? 0} Historical Transactions</strong>.
             </p>
           </div>
 
@@ -318,7 +446,11 @@ export const CasPdfUploader = React.memo(function CasPdfUploader({
             <Button size="sm" onClick={handleReset} variant="outline" className="text-xs">
               Upload Another Statement
             </Button>
-            <Button size="sm" className="text-xs font-bold gap-1.5">
+            <Button 
+              size="sm" 
+              onClick={() => router.push("/holdings")} 
+              className="text-xs font-bold gap-1.5"
+            >
               <span>View Updated Look-Through</span>
               <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
             </Button>

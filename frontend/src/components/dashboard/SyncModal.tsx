@@ -1,6 +1,8 @@
 "use client";
 
-import React, { useRef, useState } from "react";
+import React, { useRef, useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   X,
   Smartphone,
@@ -13,13 +15,17 @@ import {
   FileCheck2,
   Building2,
   CheckCircle2,
+  AlertCircle,
 } from "lucide-react";
 import { usePortfolioStore } from "@/store/portfolioStore";
 import { Button } from "@/components/ui/Button";
 import { IconButton } from "@/components/ui/IconButton";
 import { useDialogA11y } from "@/lib/useDialogA11y";
+import { authClient } from "@/lib/auth-client";
 
 export function SyncModal() {
+  const router = useRouter();
+  const { data: session } = authClient.useSession();
   const {
     isSyncModalOpen,
     closeSyncModal,
@@ -34,12 +40,17 @@ export function SyncModal() {
     syncMethod || "OTP"
   );
 
+  useEffect(() => {
+    if (syncMethod) setActiveTab(syncMethod);
+  }, [syncMethod, isSyncModalOpen]);
+
   const [mobileNumber, setMobileNumber] = useState("9876543210");
   const [panNumber, setPanNumber] = useState("ABCDE1234F");
 
   const [casPassword, setCasPassword] = useState("");
   const [casFile, setCasFile] = useState<File | null>(null);
   const [casError, setCasError] = useState("");
+  const [casAuthRequired, setCasAuthRequired] = useState(false);
   const [casProgress, setCasProgress] = useState(0);
   const [casStep, setCasStep] = useState("");
 
@@ -76,14 +87,15 @@ export function SyncModal() {
 
   const handleFileSelect = (file: File | null) => {
     setCasError("");
+    setCasAuthRequired(false);
 
     if (!file) {
       return;
     }
 
-    if (file.type !== "application/pdf") {
+    if (!file.name.toLowerCase().endsWith(".pdf") && file.type !== "application/pdf") {
       setCasFile(null);
-      setCasError("Please select a valid PDF file.");
+      setCasError("Please select a valid PDF file (CAMS, KFintech, or NSDL CAS).");
       return;
     }
 
@@ -103,6 +115,7 @@ export function SyncModal() {
   ) => {
     const file = event.target.files?.[0] ?? null;
     handleFileSelect(file);
+    if (event.target) event.target.value = "";
   };
 
   const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
@@ -115,9 +128,27 @@ export function SyncModal() {
 
   const handleCasImport = async () => {
     setCasError("");
+    setCasAuthRequired(false);
 
     if (!casFile) {
       setCasError("Please select your CAS PDF first.");
+      return;
+    }
+
+    // Check auth state before doing any upload/request
+    let currentUser = session?.user;
+    if (!currentUser) {
+      try {
+        const cur = await authClient.getSession();
+        currentUser = cur.data?.user;
+      } catch {
+        currentUser = undefined;
+      }
+    }
+
+    if (!currentUser) {
+      setCasAuthRequired(true);
+      setCasError("Please log in to import your portfolio.");
       return;
     }
 
@@ -126,17 +157,28 @@ export function SyncModal() {
 
     try {
       const formData = new FormData();
-
       formData.append("file", casFile);
       formData.append("password", casPassword);
 
       setCasProgress(25);
       setCasStep("Sending CAS statement to secure parser...");
 
-      const response = await fetch("/api/cas/imports/cas", {
+      const response = await fetch("/api/portfolio/imports/cas", {
         method: "POST",
         body: formData,
+        credentials: "include",
       });
+
+      if (response.status === 401) {
+        setCasAuthRequired(true);
+        throw new Error("Please log in to import your portfolio.");
+      }
+      if (response.status === 403) {
+        throw new Error("You don't have permission to import this portfolio.");
+      }
+      if (response.status >= 500) {
+        throw new Error("Server error while processing the statement. Please try again.");
+      }
 
       setCasProgress(60);
       setCasStep("Decrypting and parsing CAS statement...");
@@ -144,24 +186,41 @@ export function SyncModal() {
       const data = await response.json().catch(() => null);
 
       if (!response.ok) {
+        const errDetail = typeof data?.detail === "object" ? data.detail : null;
+        const code = data?.error?.code || errDetail?.code;
+        if (code === "WRONG_PASSWORD") {
+          throw new Error("Could not decrypt the CAS PDF. Please check the password.");
+        }
+        if (code === "EMPTY_CAS") {
+          throw new Error("No investment records were found in this CAS statement.");
+        }
+        if (code === "UNSUPPORTED_CAS") {
+          throw new Error("Unsupported CAS statement format.");
+        }
+        if (code === "INVALID_PDF") {
+          throw new Error("Please upload a valid PDF file (CAMS, KFintech, or NSDL CAS).");
+        }
         const message =
-          data?.detail?.message ||
           data?.error?.message ||
-          data?.detail ||
+          (typeof data?.detail === "string" ? data.detail : errDetail?.message) ||
           "Unable to process CAS statement.";
 
-        throw new Error(
-          typeof message === "string"
-            ? message
-            : "Unable to process CAS statement."
-        );
+        throw new Error(message);
+      }
+
+      const holdingsCount = Number(data?.holdings_count ?? 0);
+      const transactionsCount = Number(data?.transactions_count ?? 0);
+
+      if (holdingsCount === 0 && (!data?.holdings || data.holdings.length === 0)) {
+        throw new Error("No investment records were found in this CAS statement.");
+      }
+
+      if (data?.holdings && data.holdings.length > 0) {
+        usePortfolioStore.getState().setHoldings(data.holdings);
       }
 
       setCasProgress(100);
       setCasStep("CAS import completed successfully.");
-
-      const holdingsCount = Number(data?.holdings_count ?? 0);
-      const transactionsCount = Number(data?.transactions_count ?? 0);
 
       usePortfolioStore.setState({
         isSyncing: false,
@@ -172,9 +231,7 @@ export function SyncModal() {
         syncSource: "CAS Statement",
       });
 
-      // Keep the existing toast system if available through the store.
       const store = usePortfolioStore.getState();
-
       if ("addToast" in store && typeof (store as any).addToast === "function") {
         (store as any).addToast({
           variant: "success",
@@ -182,19 +239,9 @@ export function SyncModal() {
           description: `${holdingsCount} holdings and ${transactionsCount} transactions extracted successfully.`,
         });
       }
-
-      console.log("CAS import successful:", {
-        importId: data?.import_id,
-        portfolioId: data?.portfolio_id,
-        holdingsCount,
-        transactionsCount,
-      });
     } catch (error) {
-      console.error("CAS upload failed:", error);
-
       setCasProgress(0);
       setCasStep("");
-
       setCasError(
         error instanceof Error
           ? error.message
@@ -508,9 +555,39 @@ export function SyncModal() {
             {casError && (
               <div
                 role="alert"
-                className="p-3 rounded-xl border border-[var(--negative)]/20 bg-[var(--negative)]/10 text-xs text-[var(--negative)]"
+                className={`p-4 rounded-xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 ${
+                  casAuthRequired
+                    ? "bg-primary/10 border-primary/30 text-foreground"
+                    : "bg-[var(--negative)]/10 border-[var(--negative)]/20 text-[var(--negative)]"
+                }`}
               >
-                {casError}
+                <div className="flex items-center gap-2.5">
+                  <AlertCircle className={`w-4 h-4 shrink-0 ${casAuthRequired ? "text-primary" : "text-[var(--negative)]"}`} strokeWidth={1.75} />
+                  <span className="font-medium">{casError}</span>
+                </div>
+                {casAuthRequired && (
+                  <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        closeSyncModal();
+                        const next = typeof window !== "undefined" ? window.location.pathname : "/dashboard";
+                        router.push(`/login?next=${encodeURIComponent(next)}`);
+                      }}
+                      className="h-8 text-xs font-bold px-3 gap-1 shadow-sm"
+                    >
+                      <span>Log In</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </Button>
+                    <Link
+                      href="/signup"
+                      onClick={() => closeSyncModal()}
+                      className="text-xs text-muted-foreground hover:text-foreground font-semibold px-2 py-1"
+                    >
+                      Sign Up
+                    </Link>
+                  </div>
+                )}
               </div>
             )}
 
