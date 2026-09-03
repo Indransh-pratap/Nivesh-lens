@@ -103,7 +103,13 @@ def import_cas(db: Session, user_id: str, file_name: str | None, document_hash: 
         record.status = ImportStatus.COMPLETED
         record.completed_at = datetime.now(timezone.utc)
         db.commit()
-        return {"status": "completed", "import_id": str(record.id), "portfolio_id": str(portfolio.id)}
+        return {
+            "status": "completed",
+            "import_id": str(record.id),
+            "portfolio_id": str(portfolio.id),
+            "holdings_count": len(normalized.holdings),
+            "transactions_count": len(normalized.transactions),
+        }
     except (CasPdfError, UnsupportedCASError, CasParseError, CasNormalizationError, CasImportError) as error:
         db.rollback()
         # A failed record is committed separately so it remains auditable without retaining sensitive source data.
