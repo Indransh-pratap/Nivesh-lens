@@ -13,10 +13,24 @@ if (!betterAuthSecret) {
   throw new Error("BETTER_AUTH_SECRET is not configured");
 }
 
+// Debug: shows only the database host, never the password
+try {
+  const dbHost = new URL(databaseUrl).hostname;
+  console.log("Better Auth DB HOST:", dbHost);
+} catch {
+  throw new Error("DATABASE_URL is invalid");
+}
+
+const pool = new Pool({
+  connectionString: databaseUrl,
+});
+
+pool.on("error", (error) => {
+  console.error("Better Auth PostgreSQL pool error:", error);
+});
+
 export const auth = betterAuth({
-  database: new Pool({
-    connectionString: databaseUrl,
-  }),
+  database: pool,
 
   baseURL:
     process.env.BETTER_AUTH_URL ||
