@@ -35,7 +35,7 @@ import { CountUp } from "@/components/ui/CountUp";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { OnboardingTour } from "@/components/dashboard/OnboardingTour";
 import { cn } from "@/lib/utils";
-
+import { AMFIPortfolioUploader } from "@/components/dashboard/AMFIPortfolioUploader";
 import type { Holding } from "@/types";
 
 const VirtualizedTransactionTable =
@@ -1370,7 +1370,13 @@ export default function DashboardPage() {
           <CasPdfUploader
             onSuccess={() =>
               void loadPortfolio()
-            }
+          }
+        />
+
+<AMFIPortfolioUploader
+  onSuccess={() =>
+    void loadPortfolio()
+  }
           />
 
           <div className="p-6 rounded-2xl border border-border bg-card">

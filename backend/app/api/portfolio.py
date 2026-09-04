@@ -59,7 +59,12 @@ def get_diagnostics(portfolio_id: uuid.UUID, db: Session = Depends(get_db), user
         portfolio = portfolio_service.get_owned_portfolio(db, user_id, portfolio_id)
     except portfolio_service.PortfolioNotFoundError:
         not_found()
-    return build_diagnostics(str(portfolio.id), portfolio.holdings, portfolio.total_value)
+    return build_diagnostics(
+    str(portfolio.id),
+    portfolio.holdings,
+    portfolio.total_value,
+    db,
+    )
 
 
 # --- PHASE 2 ENDPOINTS ---

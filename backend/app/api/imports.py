@@ -7,7 +7,8 @@ from app.core.security import get_current_user_id
 from app.db.dependencies import get_db
 from app.services.cas.decrypt import CasPdfError, decrypt_cas_pdf
 from app.services.cas.import_service import CasImportError, import_cas, save_temp_pdf
-
+from app.services.amfi.client import AMFIClient, AMFIClientConfig
+from app.services.amfi.service import AMFIPortfolioService
 router = APIRouter(prefix="/imports")
 
 
@@ -37,3 +38,75 @@ async def post_cas_import(
     finally:
         if path and os.path.exists(path):
             os.unlink(path)
+@router.post("/amfi")
+async def post_amfi_import(
+    file: UploadFile,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+) -> dict:
+    if not file.filename:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "INVALID_FILE",
+                "message": "An AMFI XLSX file is required",
+            },
+        )
+
+    if not file.filename.lower().endswith(".xlsx"):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "INVALID_FILE",
+                "message": "Only XLSX files are supported",
+            },
+        )
+
+    content = await file.read()
+
+    if not content:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "EMPTY_FILE",
+                "message": "The uploaded file is empty",
+            },
+        )
+
+    if len(content) > 25 * 1024 * 1024:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "FILE_TOO_LARGE",
+                "message": "AMFI XLSX file must be 25 MB or smaller",
+            },
+        )
+
+    try:
+        client = AMFIClient(
+            AMFIClientConfig(
+                base_url="https://www.amfiindia.com",
+            )
+        )
+
+        service = AMFIPortfolioService(client)
+
+        result = service.import_xlsx(
+            db=db,
+            content=content,
+        )
+
+        return {
+            "status": "completed",
+            "filename": file.filename,
+            **result,
+        }
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "AMFI_IMPORT_ERROR",
+                "message": str(error),
+            },
+        ) from error
