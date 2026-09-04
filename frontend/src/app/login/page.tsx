@@ -21,8 +21,8 @@ function LoginPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { openSyncModal } = usePortfolioStore();
-  const [email, setEmail] = useState("anubhav.thakur@gmail.com");
-  const [password, setPassword] = useState("password123");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -37,17 +37,19 @@ function LoginPageInner() {
     setError(""); 
     setLoading(true);
     try {
-      const { error: signInError } = await authClient.signIn.email({ email, password });
+      const { error: signInError } = await authClient.signIn.email({ 
+        email: email.trim().toLowerCase(), 
+        password 
+      });
       if (signInError) {
-        // For development/demo purposes, route directly to dashboard
-        router.push("/dashboard");
+        setError(signInError.message || "Invalid email or password. Please check your credentials.");
         return;
       }
       const next = searchParams.get("next");
       router.push(next && next.startsWith("/") ? next : "/dashboard");
       router.refresh();
-    } catch {
-      router.push("/dashboard");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to sign in. Please try again.");
     } finally {
       setLoading(false);
     }
