@@ -1,10 +1,15 @@
+import logging
 import re
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
+from app.models.holding import AssetType
 from app.services.cas.detector import CASFormat
 from app.services.cas.models import RawCASData, RawHolding
 from app.services.cas.parsers.cams import parse_cams
+
+
+logger = logging.getLogger(__name__)
 
 
 class CasParseError(Exception):
@@ -12,10 +17,9 @@ class CasParseError(Exception):
 
 
 # ============================================================
-# REGEX / CONSTANTS
+# REGEX
 # ============================================================
 
-# Indian ISIN = exactly 12 characters
 _ISIN_RE = re.compile(
     r"\b[A-Z]{2}[A-Z0-9]{10}\b"
 )
@@ -44,25 +48,16 @@ def _to_decimal(value: str) -> Decimal | None:
         return None
 
 
-def _numbers(text: str) -> list[str]:
-    """
-    Extract numeric values from a line/block.
-
-    Example:
-        '40 1,285.60 51,424.00'
-    becomes:
-        ['40', '1285.60', '51424.00']
-    """
-
-    result: list[str] = []
+def _extract_numbers(text: str) -> list[str]:
+    values: list[str] = []
 
     for match in _NUMBER_RE.finditer(text):
         value = _normalize_number(match.group(0))
 
         if _to_decimal(value) is not None:
-            result.append(value)
+            values.append(value)
 
-    return result
+    return values
 
 
 def _extract_isin(text: str) -> str | None:
@@ -73,6 +68,10 @@ def _extract_isin(text: str) -> str | None:
 
     return match.group(0)
 
+
+# ============================================================
+# DATE / PERIOD
+# ============================================================
 
 def _parse_date(value: str) -> date | None:
     formats = (
@@ -88,14 +87,10 @@ def _parse_date(value: str) -> date | None:
         try:
             return datetime.strptime(value, fmt).date()
         except ValueError:
-            pass
+            continue
 
     return None
 
-
-# ============================================================
-# STATEMENT PERIOD
-# ============================================================
 
 def _period(text: str) -> date | None:
     patterns = [
@@ -103,7 +98,7 @@ def _period(text: str) -> date | None:
         r"STATEMENT\s+FOR\s+THE\s+PERIOD\s+FROM\s+"
         r"(\d{1,2}[/-][A-Za-z]{3,9}[/-]\d{4})",
 
-        # Statement Period: 01/03/2025 - 31/03/2025
+        # Statement Period: 01/03/2025
         r"(?:STATEMENT\s+PERIOD|PERIOD)\s*[:\-]?\s*"
         r"(?:FROM\s*)?"
         r"(\d{1,2}[/-]\d{1,2}[/-]\d{4})",
@@ -112,7 +107,7 @@ def _period(text: str) -> date | None:
         r"(?:AS\s+ON|AS\s+OF)\s*[:\-]?\s*"
         r"(\d{1,2}[/-]\d{1,2}[/-]\d{4})",
 
-        # Generic date fallback
+        # Generic fallback
         r"(\d{1,2}[/-]\d{1,2}[/-]\d{4})",
     ]
 
@@ -131,15 +126,10 @@ def _period(text: str) -> date | None:
 
 
 # ============================================================
-# CAS FORMAT HELPERS
+# FORMAT HELPERS
 # ============================================================
 
 def _format_string(cas_format: CASFormat) -> str:
-    """
-    Safely get the detector format without assuming enum members
-    such as CASFormat.CDSL exist.
-    """
-
     value = getattr(cas_format, "value", None)
 
     if value is not None:
@@ -148,34 +138,42 @@ def _format_string(cas_format: CASFormat) -> str:
     return str(cas_format).upper()
 
 
-def _is_cams(cas_format: CASFormat, text: str) -> bool:
-    fmt = _format_string(cas_format)
-
-    return (
-        "CAMS" in fmt
-        or (
-            "FOLIO NO" in text.upper()
-            and "MUTUAL FUND" in text.upper()
-        )
-    )
-
-
 def _looks_like_cdsl(text: str) -> bool:
     """
-    Detect the actual CDSL-style table from document content.
-
-    We deliberately inspect the document text rather than relying
-    on a CASFormat.CDSL enum member because this project does not
-    define that enum member.
+    Detect CDSL/depository format from actual document content.
+    We intentionally do not rely on CASFormat.CDSL because
+    this project does not define that member.
     """
 
     upper = text.upper()
 
     return (
-        "CDSL DEMAT ACCOUNT" in upper
+        (
+            "CDSL" in upper
+            or "DEPOSITORY" in upper
+            or "DP ID" in upper
+        )
         and "EQUITY SHARES" in upper
         and "CURRENT BAL" in upper
-        and "MARKET PRICE" in upper
+    )
+
+
+def _is_cams_format(
+    cas_format: CASFormat,
+    text: str,
+) -> bool:
+    fmt = _format_string(cas_format)
+    upper = text.upper()
+
+    if _looks_like_cdsl(text):
+        return False
+
+    return (
+        "CAMS" in fmt
+        or (
+            "FOLIO NO" in upper
+            and "MUTUAL FUND" in upper
+        )
     )
 
 
@@ -184,6 +182,8 @@ def _looks_like_cdsl(text: str) -> bool:
 # ============================================================
 
 def _looks_like_transaction(text: str) -> bool:
+    upper = text.upper()
+
     transaction_words = (
         "PURCHASE",
         "PURCHASED",
@@ -205,13 +205,80 @@ def _looks_like_transaction(text: str) -> bool:
         "SELL",
     )
 
-    upper = text.upper()
-
-    return any(word in upper for word in transaction_words)
+    return any(
+        word in upper
+        for word in transaction_words
+    )
 
 
 # ============================================================
-# CDSL EQUITY SHARES
+# SHORT CODE / HEADER FILTER
+# ============================================================
+
+def _looks_like_short_code(text: str) -> bool:
+    """
+    CDSL mutual-fund statements often put a short code immediately
+    after the ISIN, e.g.:
+
+        INF209K01VD8
+        UTI01
+        UTI Nifty 50 Index Fund - Direct - Growth
+
+    UTI01/KOT02/PPF03 should NOT become the scheme name.
+    """
+
+    value = _clean_spaces(text)
+
+    if not value:
+        return True
+
+    # Common CAS short codes.
+    if re.fullmatch(
+        r"[A-Z]{2,8}\d{1,5}",
+        value,
+        re.I,
+    ):
+        return True
+
+    # Generic all-uppercase alphanumeric codes.
+    if re.fullmatch(
+        r"[A-Z0-9/_-]{2,15}",
+        value,
+        re.I,
+    ):
+        # Keep real words such as ETF, GROWTH etc. out of this.
+        if " " not in value:
+            return True
+
+    return False
+
+
+def _looks_like_header(text: str) -> bool:
+    upper = _clean_spaces(text).upper()
+
+    headers = {
+        "ISIN",
+        "DESCRIPTION",
+        "SCHEME NAME",
+        "SCHEME NAME / FOLIO",
+        "CURRENT BAL",
+        "CURRENT BALANCE",
+        "NAV",
+        "VALUE IN RS.",
+        "VALUE IN RS",
+        "MARKET PRICE",
+        "STOCK SYMBOL",
+        "COMPANY NAME",
+        "SECURITY",
+        "SECURITY NAME",
+        "FOLIO",
+    }
+
+    return upper in headers
+
+
+# ============================================================
+# CDSL EQUITY PARSER
 # ============================================================
 
 def _parse_cdsl_equity_lines(
@@ -230,25 +297,42 @@ def _parse_cdsl_equity_lines(
 
         upper = line.upper()
 
-        # Start of equity section
+        # Start equity section
         if upper.startswith("EQUITY SHARES"):
             in_equity_section = True
             continue
 
-        # Stop at mutual funds section
-        if upper.startswith("MUTUAL FUNDS"):
+        # Also handle lines where the heading appears with extra text
+        if (
+            "EQUITY SHARES" in upper
+            and "ISIN" not in upper
+            and "CURRENT BAL" not in upper
+            and "MARKET PRICE" not in upper
+        ):
+            in_equity_section = True
+            continue
+
+        # End equity section
+        if (
+            in_equity_section
+            and (
+                "MUTUAL FUNDS" in upper
+                or upper.startswith("SUB TOTAL")
+            )
+        ):
             in_equity_section = False
             continue
 
         if not in_equity_section:
             continue
 
-        # Skip table header/subtotal
+        # Ignore table headings
         if (
             "ISIN DESCRIPTION" in upper
             or "STOCK SYMBOL" in upper
             or "COMPANY NAME" in upper
-            or upper.startswith("SUB TOTAL")
+            or "CURRENT BAL" in upper
+            or "MARKET PRICE" in upper
         ):
             continue
 
@@ -259,10 +343,6 @@ def _parse_cdsl_equity_lines(
 
         if _looks_like_transaction(line):
             continue
-
-        # --------------------------------------------------------
-        # Remove ISIN from line
-        # --------------------------------------------------------
 
         isin_match = re.search(
             rf"\b{re.escape(isin)}\b",
@@ -277,19 +357,22 @@ def _parse_cdsl_equity_lines(
             line[isin_match.end():]
         )
 
-        # --------------------------------------------------------
-        # Extract the final 3 numeric columns:
+        # Expected:
         #
-        # Current Bal
-        # Market Price
-        # Value in Rs.
-        # --------------------------------------------------------
+        # RELIANCE Reliance Industries Ltd 40 1,285.60 51,424.00
+        #
+        # Last 3 numbers are:
+        # Current Bal / Market Price / Value
 
         number_matches = list(
             _NUMBER_RE.finditer(remaining)
         )
 
         if len(number_matches) < 3:
+            logger.debug(
+                "Skipping equity row without 3 numeric values: %s",
+                line,
+            )
             continue
 
         last_three = number_matches[-3:]
@@ -306,7 +389,6 @@ def _parse_cdsl_equity_lines(
             last_three[2].group(0)
         )
 
-        # Text before numeric columns
         text_before_numbers = _clean_spaces(
             remaining[:last_three[0].start()]
         )
@@ -314,47 +396,29 @@ def _parse_cdsl_equity_lines(
         if not text_before_numbers:
             continue
 
-        # --------------------------------------------------------
-        # Expected:
-        #
-        # DESCRIPTION STOCK_SYMBOL COMPANY_NAME
+        # CDSL equity line: ISIN | Symbol | Company Name
         #
         # Example:
-        # RELIANCE RELIANCE Industries Ltd
-        # --------------------------------------------------------
+        # INE002A01018 RELIANCE Reliance Industries Ltd 40 1,285.60 51,424.00
+        #
+        # ISIN + Symbol occupy the first 2 tokens; skip 1 token and keep the company name.
+        parts = text_before_numbers.split()
 
-        name_parts = text_before_numbers.split(
-            None,
-            2,
+        if len(parts) >= 2:
+            company_name = " ".join(parts[1:])
+        elif len(parts) == 2:
+            company_name = parts[1]
+        else:
+            company_name = parts[0]
+
+        company_name = _clean_spaces(
+            company_name
         )
 
-        if len(name_parts) >= 3:
-            description = name_parts[0]
-            stock_symbol = name_parts[1]
-            company_name = name_parts[2]
-
-            # Prefer actual company name.
-            name = company_name
-
-            # If company name somehow looks invalid, fall back.
-            if len(name) < 2:
-                name = (
-                    f"{description} "
-                    f"{stock_symbol}"
-                )
-
-        elif len(name_parts) == 2:
-            name = name_parts[1]
-
-        else:
-            name = name_parts[0]
-
-        name = _clean_spaces(name)
-
-        if not name:
+        if not company_name:
             continue
 
-        # Validate numeric values
+        # Validate values
         if (
             _to_decimal(units) is None
             or _to_decimal(current_price) is None
@@ -362,22 +426,37 @@ def _parse_cdsl_equity_lines(
         ):
             continue
 
-        holdings.append(
-            RawHolding(
-                name=name,
-                isin=isin,
-                units=units,
-                average_cost=None,
-                current_value=current_value,
-                current_price=current_price,
-            )
+        holding = RawHolding(
+            name=company_name,
+            isin=isin,
+            units=units,
+            average_cost=None,
+            current_value=current_value,
+            current_price=current_price,
+            asset_type=AssetType.STOCK,
         )
+
+        holdings.append(holding)
+
+        logger.debug(
+            "Parsed equity: %s | %s | units=%s | price=%s | value=%s",
+            company_name,
+            isin,
+            units,
+            current_price,
+            current_value,
+        )
+
+    logger.info(
+        "CDSL parser: parsed %d equity holdings",
+        len(holdings),
+    )
 
     return holdings
 
 
 # ============================================================
-# CDSL MUTUAL FUNDS
+# CDSL MUTUAL FUND PARSER
 # ============================================================
 
 def _parse_cdsl_mutual_funds(
@@ -390,8 +469,9 @@ def _parse_cdsl_mutual_funds(
 
     pending_isin: str | None = None
     pending_name: str | None = None
+    pending_folio: str | None = None
 
-    for index, raw_line in enumerate(lines):
+    for raw_line in lines:
         line = _clean_spaces(raw_line)
 
         if not line:
@@ -400,18 +480,25 @@ def _parse_cdsl_mutual_funds(
         upper = line.upper()
 
         # --------------------------------------------------------
-        # Section detection
+        # Start MF section
         # --------------------------------------------------------
 
-        if upper.startswith("MUTUAL FUNDS"):
+        if "MUTUAL FUNDS" in upper:
             in_mf_section = True
+
             pending_isin = None
             pending_name = None
+            pending_folio = None
+
             continue
 
-        if (
-            in_mf_section
-            and upper.startswith("SUB TOTAL")
+        # --------------------------------------------------------
+        # End MF section
+        # --------------------------------------------------------
+
+        if in_mf_section and (
+            upper.startswith("SUB TOTAL")
+            or upper.startswith("GRAND TOTAL")
         ):
             in_mf_section = False
             continue
@@ -419,7 +506,10 @@ def _parse_cdsl_mutual_funds(
         if not in_mf_section:
             continue
 
-        # Skip header
+        # --------------------------------------------------------
+        # Skip MF headers
+        # --------------------------------------------------------
+
         if (
             "ISIN DESCRIPTION" in upper
             or "SCHEME NAME" in upper
@@ -430,55 +520,135 @@ def _parse_cdsl_mutual_funds(
             continue
 
         # --------------------------------------------------------
-        # ISIN line
+        # New ISIN
         # --------------------------------------------------------
 
         isin = _extract_isin(line)
 
         if isin:
+            # Start a new MF record.
             pending_isin = isin
+            pending_name = None
+            pending_folio = None
 
-            # Sometimes another text exists after the ISIN
-            remaining = _clean_spaces(
-                re.sub(
-                    rf"\b{re.escape(isin)}\b",
-                    "",
-                    line,
-                    flags=re.I,
-                )
+            isin_pos = upper.find(isin)
+
+            after_isin = _clean_spaces(
+                line[
+                    isin_pos + len(isin):
+                ]
             )
 
-            # Ignore simple codes like UTI01
-            if (
-                remaining
-                and not re.fullmatch(
-                    r"[A-Z0-9/_-]+",
-                    remaining,
+            # Sometimes numeric values can be on same line.
+            number_matches = list(
+                _NUMBER_RE.finditer(after_isin)
+            )
+
+            if len(number_matches) >= 3:
+                last_three = number_matches[-3:]
+
+                units = _normalize_number(
+                    last_three[0].group(0)
                 )
-            ):
-                pending_name = remaining
+
+                current_price = _normalize_number(
+                    last_three[1].group(0)
+                )
+
+                current_value = _normalize_number(
+                    last_three[2].group(0)
+                )
+
+                scheme_name = _clean_spaces(
+                    after_isin[
+                        :last_three[0].start()
+                    ]
+                )
+
+                if (
+                    scheme_name
+                    and not _looks_like_short_code(
+                        scheme_name
+                    )
+                ):
+                    pending_name = scheme_name
+
+                if (
+                    pending_name
+                    and _to_decimal(units) is not None
+                    and _to_decimal(current_price) is not None
+                    and _to_decimal(current_value) is not None
+                ):
+                    holdings.append(
+                        RawHolding(
+                            name=pending_name,
+                            isin=pending_isin,
+                            units=units,
+                            average_cost=None,
+                            current_value=current_value,
+                            current_price=current_price,
+                            asset_type=AssetType.MUTUAL_FUND,
+                            folio_number=pending_folio,
+                        )
+                    )
+
+                    logger.debug(
+                        "Parsed MF: %s | %s | units=%s | nav=%s | value=%s",
+                        pending_name,
+                        pending_isin,
+                        units,
+                        current_price,
+                        current_value,
+                    )
+
+                    pending_isin = None
+                    pending_name = None
+                    pending_folio = None
+
+                continue
+
+            # ----------------------------------------------------
+            # Text after ISIN
+            #
+            # Example:
+            # INF209K01VD8 UTI01
+            #
+            # Do NOT store UTI01 as scheme name.
+            # ----------------------------------------------------
+
+            if after_isin:
+                if not _looks_like_short_code(
+                    after_isin
+                ):
+                    pending_name = after_isin
 
             continue
 
-        # No active ISIN => nothing to parse
+        # No active MF record.
         if not pending_isin:
             continue
 
         # --------------------------------------------------------
-        # Scheme / folio / numeric line
+        # Folio
+        # --------------------------------------------------------
+
+        folio_match = re.search(
+            r"\bFOLIO\s*:\s*([A-Za-z0-9/_-]+)",
+            line,
+            re.I,
+        )
+
+        if folio_match:
+            pending_folio = folio_match.group(1)
+
+        # --------------------------------------------------------
+        # Numeric row
         # --------------------------------------------------------
 
         number_matches = list(
             _NUMBER_RE.finditer(line)
         )
 
-        # The holding-value row has:
-        # Current Bal
-        # NAV
-        # Value
-        #
-        # Example:
-        # 410.250 185.32 76,036.35
         if len(number_matches) >= 3:
             last_three = number_matches[-3:]
 
@@ -494,21 +664,46 @@ def _parse_cdsl_mutual_funds(
                 last_three[2].group(0)
             )
 
-            # If line has text before numbers, it may contain
-            # scheme name on the same line.
+            # Sometimes scheme name is on same line as values.
             text_before_numbers = _clean_spaces(
                 line[:last_three[0].start()]
             )
 
             if text_before_numbers:
+                text_before_numbers = re.sub(
+                    r"\bFOLIO\s*:\s*[A-Za-z0-9/_-]+",
+                    "",
+                    text_before_numbers,
+                    flags=re.I,
+                )
+
+                candidate_name = _clean_spaces(
+                    text_before_numbers
+                )
+
                 if (
-                    not text_before_numbers.upper().startswith(
-                        "FOLIO"
+                    candidate_name
+                    and not _looks_like_short_code(
+                        candidate_name
+                    )
+                    and not _looks_like_header(
+                        candidate_name
                     )
                 ):
-                    pending_name = text_before_numbers
+                    pending_name = candidate_name
 
-            # Validate values
+            # ----------------------------------------------------
+            # We need actual scheme name
+            # ----------------------------------------------------
+
+            if not pending_name:
+                logger.debug(
+                    "MF numeric row found but scheme name missing: %s",
+                    line,
+                )
+                continue
+
+            # Validate values.
             if (
                 _to_decimal(units) is None
                 or _to_decimal(current_price) is None
@@ -516,70 +711,32 @@ def _parse_cdsl_mutual_funds(
             ):
                 continue
 
-            # Need a real scheme name.
-            if not pending_name:
-                # Search backwards for scheme name.
-                for back in range(1, 4):
-                    previous_index = index - back
-
-                    if previous_index < 0:
-                        break
-
-                    candidate = _clean_spaces(
-                        lines[previous_index]
-                    )
-
-                    if not candidate:
-                        continue
-
-                    candidate_upper = candidate.upper()
-
-                    if _extract_isin(candidate):
-                        continue
-
-                    if candidate_upper.startswith(
-                        "FOLIO"
-                    ):
-                        continue
-
-                    if re.fullmatch(
-                        r"[A-Z0-9/_-]+",
-                        candidate,
-                    ):
-                        continue
-
-                    if "SUB TOTAL" in candidate_upper:
-                        continue
-
-                    if (
-                        "CURRENT BAL" in candidate_upper
-                        or "NAV" in candidate_upper
-                        or "VALUE IN RS" in candidate_upper
-                    ):
-                        continue
-
-                    pending_name = candidate
-                    break
-
-            if not pending_name:
-                continue
-
-            name = _clean_spaces(pending_name)
-
-            holdings.append(
-                RawHolding(
-                    name=name,
-                    isin=pending_isin,
-                    units=units,
-                    average_cost=None,
-                    current_value=current_value,
-                    current_price=current_price,
-                )
+            holding = RawHolding(
+                name=pending_name,
+                isin=pending_isin,
+                units=units,
+                average_cost=None,
+                current_value=current_value,
+                current_price=current_price,
+                asset_type=AssetType.MUTUAL_FUND,
+                folio_number=pending_folio,
             )
 
-            # Reset for next mutual fund.
+            holdings.append(holding)
+
+            logger.debug(
+                "Parsed MF: %s | %s | units=%s | NAV=%s | value=%s",
+                pending_name,
+                pending_isin,
+                units,
+                current_price,
+                current_value,
+            )
+
+            # Reset for next MF.
             pending_isin = None
             pending_name = None
+            pending_folio = None
 
             continue
 
@@ -588,21 +745,18 @@ def _parse_cdsl_mutual_funds(
         # --------------------------------------------------------
 
         if (
-            upper.startswith("FOLIO")
-            or re.fullmatch(
-                r"[A-Z0-9/_-]+",
-                line,
-            )
+            not pending_name
+            and len(line) > 3
+            and not _looks_like_short_code(line)
+            and not _looks_like_header(line)
+            and not _looks_like_transaction(line)
         ):
-            # This is a folio or short scheme code.
-            continue
-
-        if _looks_like_transaction(line):
-            continue
-
-        # Save as scheme name.
-        if len(line) >= 3:
             pending_name = line
+
+    logger.info(
+        "CDSL parser: parsed %d mutual fund holdings",
+        len(holdings),
+    )
 
     return holdings
 
@@ -626,7 +780,10 @@ def _parse_label_based_holdings(
     )
 
     for match in pattern.finditer(text):
-        name = _clean_spaces(match.group("name"))
+        name = _clean_spaces(
+            match.group("name")
+        )
+
         body = match.group("body")
 
         if not name:
@@ -639,28 +796,32 @@ def _parse_label_based_holdings(
 
         units_match = re.search(
             r"(?:UNITS?|BALANCE|UNITS\s+HELD)"
-            r"\s*[:\-]?\s*([0-9][0-9,]*(?:\.\d+)?)",
+            r"\s*[:\-]?\s*"
+            r"([0-9][0-9,]*(?:\.\d+)?)",
             body,
             re.I,
         )
 
         value_match = re.search(
             r"(?:CURRENT\s+VALUE|MARKET\s+VALUE|VALUATION|VALUE)"
-            r"\s*[:\-]?\s*([0-9][0-9,]*(?:\.\d+)?)",
+            r"\s*[:\-]?\s*"
+            r"([0-9][0-9,]*(?:\.\d+)?)",
             body,
             re.I,
         )
 
         average_match = re.search(
             r"(?:AVERAGE\s+(?:COST|PRICE)|COST\s+PRICE)"
-            r"\s*[:\-]?\s*([0-9][0-9,]*(?:\.\d+)?)",
+            r"\s*[:\-]?\s*"
+            r"([0-9][0-9,]*(?:\.\d+)?)",
             body,
             re.I,
         )
 
         price_match = re.search(
             r"(?:NAV|CURRENT\s+PRICE|PRICE)"
-            r"\s*[:\-]?\s*([0-9][0-9,]*(?:\.\d+)?)",
+            r"\s*[:\-]?\s*"
+            r"([0-9][0-9,]*(?:\.\d+)?)",
             body,
             re.I,
         )
@@ -723,18 +884,19 @@ def _parse_isin_fallback(
         if _looks_like_transaction(line):
             continue
 
-        # Gather current + next few lines.
-        end = min(index + 5, len(lines))
+        end = min(
+            index + 5,
+            len(lines),
+        )
 
         block_lines = lines[index:end]
         block = " ".join(block_lines)
 
-        numbers = _numbers(block)
+        numbers = _extract_numbers(block)
 
         if len(numbers) < 2:
             continue
 
-        # Try to use first two/three values.
         units = numbers[0]
         current_value = numbers[-1]
 
@@ -744,8 +906,7 @@ def _parse_isin_fallback(
             else None
         )
 
-        # Find name from nearby lines.
-        name = None
+        name: str | None = None
 
         for candidate in block_lines:
             cleaned = re.sub(
@@ -771,6 +932,7 @@ def _parse_isin_fallback(
                 "CURRENT BAL",
                 "MARKET PRICE",
                 "VALUE IN RS.",
+                "VALUE IN RS",
             }:
                 continue
 
@@ -780,7 +942,14 @@ def _parse_isin_fallback(
             ):
                 continue
 
-            if _looks_like_transaction(cleaned):
+            if _looks_like_short_code(
+                cleaned
+            ):
+                continue
+
+            if _looks_like_transaction(
+                cleaned
+            ):
                 continue
 
             name = cleaned
@@ -813,7 +982,7 @@ def _deduplicate_holdings(
 
     unique: dict[
         tuple[str, str | None],
-        RawHolding
+        RawHolding,
     ] = {}
 
     for holding in holdings:
@@ -827,10 +996,17 @@ def _deduplicate_holdings(
             else None
         )
 
-        key = (
-            name_key,
-            isin_key,
-        )
+        # ISIN is the strongest identity.
+        if isin_key:
+            key = (
+                isin_key,
+                name_key,
+            )
+        else:
+            key = (
+                name_key,
+                None,
+            )
 
         if key not in unique:
             unique[key] = holding
@@ -839,7 +1015,7 @@ def _deduplicate_holdings(
 
 
 # ============================================================
-# MAIN PARSER
+# MAIN CAS PARSER
 # ============================================================
 
 def parse_cas(
@@ -859,11 +1035,20 @@ def parse_cas(
         .replace("\r", "\n")
     )
 
-    # --------------------------------------------------------
-    # CAMS
-    # --------------------------------------------------------
+    format_str = _format_string(
+        cas_format
+    )
 
-    if _is_cams(
+    logger.info(
+        "parse_cas: detected format = %s",
+        format_str,
+    )
+
+    # ========================================================
+    # CAMS
+    # ========================================================
+
+    if _is_cams_format(
         cas_format,
         normalized_text,
     ):
@@ -872,40 +1057,53 @@ def parse_cas(
                 normalized_text
             )
         except ValueError as error:
-            raise CasParseError(
-                str(error)
-            ) from error
+            logger.warning(
+                "CAMS parser failed, falling back to generic parser: %s",
+                error,
+            )
 
-    lines = [
-        line
-        for line in normalized_text.splitlines()
-    ]
+    # ========================================================
+    # CDSL / DEPOSITORY
+    # ========================================================
+
+    lines = normalized_text.splitlines()
 
     holdings: list[RawHolding] = []
 
-    # --------------------------------------------------------
-    # CDSL
-    #
-    # Detect from actual PDF content.
-    # Do NOT use CASFormat.CDSL.
-    # --------------------------------------------------------
-
-    if _looks_like_cdsl(
-        normalized_text
+    if (
+        _looks_like_cdsl(normalized_text)
+        or format_str == "DEPOSITORY"
     ):
-        # Equity Shares
-        holdings.extend(
-            _parse_cdsl_equity_lines(lines)
+        equity_holdings = (
+            _parse_cdsl_equity_lines(
+                lines
+            )
         )
 
-        # Mutual Funds
-        holdings.extend(
-            _parse_cdsl_mutual_funds(lines)
+        mutual_fund_holdings = (
+            _parse_cdsl_mutual_funds(
+                lines
+            )
         )
 
-    # --------------------------------------------------------
-    # Generic fallback
-    # --------------------------------------------------------
+        holdings.extend(
+            equity_holdings
+        )
+
+        holdings.extend(
+            mutual_fund_holdings
+        )
+
+        logger.info(
+            "CDSL parser result: %d equity + %d mutual funds = %d total",
+            len(equity_holdings),
+            len(mutual_fund_holdings),
+            len(holdings),
+        )
+
+    # ========================================================
+    # GENERIC FALLBACK
+    # ========================================================
 
     if not holdings:
         holdings.extend(
@@ -914,9 +1112,9 @@ def parse_cas(
             )
         )
 
-    # --------------------------------------------------------
-    # ISIN fallback
-    # --------------------------------------------------------
+    # ========================================================
+    # ISIN FALLBACK
+    # ========================================================
 
     if not holdings:
         holdings.extend(
@@ -925,17 +1123,22 @@ def parse_cas(
             )
         )
 
-    # --------------------------------------------------------
-    # Deduplicate
-    # --------------------------------------------------------
+    # ========================================================
+    # DEDUPLICATE
+    # ========================================================
 
     holdings = _deduplicate_holdings(
         holdings
     )
 
-    # --------------------------------------------------------
-    # Final validation
-    # --------------------------------------------------------
+    logger.info(
+        "parse_cas: successfully parsed %d total holdings",
+        len(holdings),
+    )
+
+    # ========================================================
+    # VALIDATION
+    # ========================================================
 
     if not holdings:
         raise CasParseError(
@@ -943,7 +1146,7 @@ def parse_cas(
         )
 
     return RawCASData(
-        format_name=_format_string(cas_format),
+        format_name=format_str,
         holdings=holdings,
         transactions=[],
         statement_period=_period(
