@@ -26,10 +26,16 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="Portfolio X-Ray API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_url],
+    allow_origins=[
+        settings.frontend_url,
+        "https://nivesh-lens.vercel.app",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
-    allow_methods=["GET", "POST", "DELETE"],
-    allow_headers=["Content-Type", "X-Portfolio-User-ID", "X-Portfolio-Timestamp", "X-Portfolio-Signature"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 app.include_router(health_router, prefix="/api", tags=["health"])
 app.include_router(portfolio_router, prefix="/api", tags=["portfolios"])

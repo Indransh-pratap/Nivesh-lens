@@ -4,7 +4,12 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { auth } from "@/lib/auth";
 
-const fastApiUrl = process.env.FASTAPI_URL ?? "http://localhost:8000";
+const fastApiUrl = (
+  process.env.FASTAPI_URL?.replace(/\/+$/, "") ||
+  (process.env.NODE_ENV === "production"
+    ? "https://nivesh-lens-production.up.railway.app"
+    : "http://localhost:8000")
+).replace(/\/+$/, "");
 const sharedSecret = process.env.INTERNAL_API_SECRET;
 
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {

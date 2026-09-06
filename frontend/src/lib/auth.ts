@@ -38,16 +38,41 @@ export const auth = betterAuth({
 
   secret: betterAuthSecret,
 
-  trustedOrigins: [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    ...(process.env.BETTER_AUTH_URL ? [process.env.BETTER_AUTH_URL] : []),
-    ...(process.env.VERCEL_URL ? [`https://${process.env.VERCEL_URL}`] : []),
-    ...(process.env.NEXT_PUBLIC_APP_URL ? [process.env.NEXT_PUBLIC_APP_URL] : []),
-    // Wildcard match for all Vercel deployments (*.vercel.app)
-    "https://*.vercel.app",
-    "https://nivesh-lens.vercel.app",
-  ],
+  trustedOrigins: async (request?: Request) => {
+    const origins = [
+      "http://localhost:3000",
+      "http://127.0.0.1:3000",
+      "https://nivesh-lens.vercel.app",
+      "https://*.vercel.app",
+      ...(process.env.BETTER_AUTH_URL ? [process.env.BETTER_AUTH_URL] : []),
+      ...(process.env.VERCEL_URL ? [`https://${process.env.VERCEL_URL}`] : []),
+      ...(process.env.NEXT_PUBLIC_APP_URL ? [process.env.NEXT_PUBLIC_APP_URL] : []),
+    ];
+
+    if (request) {
+      const originHeader = request.headers.get("origin");
+      const refererHeader = request.headers.get("referer");
+
+      for (const candidate of [originHeader, refererHeader]) {
+        if (!candidate) continue;
+        try {
+          const parsed = new URL(candidate);
+          if (
+            parsed.hostname.endsWith(".vercel.app") ||
+            parsed.hostname === "localhost" ||
+            parsed.hostname === "127.0.0.1" ||
+            parsed.hostname.includes("railway.app")
+          ) {
+            origins.push(parsed.origin);
+          }
+        } catch {
+          // ignore invalid urls
+        }
+      }
+    }
+
+    return origins;
+  },
 
   emailAndPassword: {
     enabled: true,
