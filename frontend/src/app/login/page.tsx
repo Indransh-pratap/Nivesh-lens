@@ -46,7 +46,8 @@ function LoginPageInner() {
         return;
       }
       const next = searchParams.get("next");
-      router.push(next && next.startsWith("/") ? next : "/dashboard");
+      const target = next && next.startsWith("/") && !next.startsWith("/login") ? next : "/dashboard";
+      router.push(target);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to sign in. Please try again.");
