@@ -19,7 +19,11 @@ class ParsedSchemePortfolio:
     holdings: list[SchemeHoldingItem]
 
 
-def _parse_decimal(value: str) -> Decimal:
+def _parse_decimal(value: object) -> Decimal:
+    if isinstance(value, Decimal):
+        return value
+    if isinstance(value, (int, float)):
+        return Decimal(str(value))
     cleaned = str(value).strip().replace(",", "").replace("%", "")
     if not cleaned:
         raise ValueError("Empty numeric value")
@@ -71,6 +75,8 @@ def parse_portfolio_csv(content: str) -> list[SchemeHoldingItem]:
         "company name",
         "company",
         "name",
+        "name of the instrument",
+        "issuer",
     )
 
     isin_index = _find_column(headers, "isin")
@@ -87,7 +93,25 @@ def parse_portfolio_csv(content: str) -> list[SchemeHoldingItem]:
         "weight %",
         "weight",
         "% of net assets",
+        "% to net assets",
+        "% to aum",
+        "% of aum",
         "percentage",
+    )
+
+    qty_index = _find_column(
+        headers,
+        "quantity",
+        "qty",
+    )
+
+    mkt_val_index = _find_column(
+        headers,
+        "market value",
+        "market value (rs. in lakhs)",
+        "market value(rs. in lakhs)",
+        "mkt value",
+        "market_value",
     )
 
     if company_index is None:
@@ -121,9 +145,19 @@ def parse_portfolio_csv(content: str) -> list[SchemeHoldingItem]:
         if not company_name:
             continue
 
+        company_upper = company_name.upper()
+        # Non-equity / cash exclusion
+        non_equity_keywords = [
+            "CASH", "TREPS", "REPO", "REVERSE REPO", "NET CURRENT ASSETS",
+            "NET RECEIVABLES", "CLEARING CORPORATION", "MUTUAL FUND UNITS",
+            "TOTAL", "SUB TOTAL", "SUB-TOTAL", "GRAND TOTAL"
+        ]
+        if any(kw in company_upper for kw in non_equity_keywords):
+            continue
+
         try:
             weight = _parse_decimal(row[weight_index])
-        except ValueError:
+        except (ValueError, TypeError):
             continue
 
         if weight < 0:
@@ -141,14 +175,36 @@ def parse_portfolio_csv(content: str) -> list[SchemeHoldingItem]:
             else None
         )
 
+        qty: Decimal | None = None
+        if qty_index is not None and qty_index < len(row):
+            try:
+                qty = _parse_decimal(row[qty_index])
+            except (ValueError, TypeError):
+                qty = None
+
+        mkt_val: Decimal | None = None
+        if mkt_val_index is not None and mkt_val_index < len(row):
+            try:
+                mkt_val = _parse_decimal(row[mkt_val_index])
+            except (ValueError, TypeError):
+                mkt_val = None
+
         holdings.append(
             SchemeHoldingItem(
                 company_name=company_name,
                 company_isin=company_isin or None,
                 sector=sector or None,
                 weight_percentage=weight,
+                quantity=qty,
+                market_value=mkt_val,
             )
         )
+
+    # Normalize fractional weights (e.g. 0.082 -> 8.2%) if total sum <= 1.05
+    raw_weights = [h.weight_percentage for h in holdings if h.weight_percentage is not None]
+    if raw_weights and Decimal("0") < sum(raw_weights) <= Decimal("1.05"):
+        for h in holdings:
+            h.weight_percentage = h.weight_percentage * Decimal("100")
 
     return holdings
 
@@ -312,10 +368,27 @@ def parse_portfolio_xlsx(
             "industry",
         )
 
+        qty_index = _find_column(
+            headers,
+            "quantity",
+            "qty",
+        )
+
+        mkt_val_index = _find_column(
+            headers,
+            "market value",
+            "market value (rs. in lakhs)",
+            "market value(rs. in lakhs)",
+            "mkt value",
+            "market_value",
+        )
+
         weight_index = _find_column(
             headers,
             "% to aum",
-            "% of aum",
+            "% to nav",
+            "weight",
+            "percentage",
         )
 
         if (
@@ -369,11 +442,26 @@ def parse_portfolio_xlsx(
                 continue
 
             # Stop stock look-through once debt begins.
-            if "DEBT INSTRUMENTS" in company_upper:
+            if (
+                "DEBT INSTRUMENTS" in company_upper
+                or "DEBT & DEBT RELATED" in company_upper
+                or "MONEY MARKET" in company_upper
+            ):
                 in_equity_section = False
                 continue
 
             if not in_equity_section:
+                continue
+
+            # Non-equity item exclusion
+            non_equity_keywords = [
+                "CASH", "TREPS", "REPO", "REVERSE REPO", "NET CURRENT ASSETS",
+                "NET RECEIVABLES", "CLEARING CORPORATION", "MUTUAL FUND UNITS",
+                "TOTAL", "SUB TOTAL", "SUB-TOTAL", "GRAND TOTAL", "DEBT",
+                "COMMERCIAL PAPER", "CERTIFICATE OF DEPOSIT", "TREASURY BILLS",
+                "GOVERNMENT SECURITIES", "G-SEC"
+            ]
+            if any(kw in company_upper for kw in non_equity_keywords):
                 continue
 
             # Ignore headings/categories.
@@ -388,14 +476,36 @@ def parse_portfolio_xlsx(
             if weight < 0:
                 continue
 
+            qty: Decimal | None = None
+            if qty_index is not None and qty_index < len(values):
+                try:
+                    qty = _parse_decimal(values[qty_index])
+                except (ValueError, TypeError):
+                    qty = None
+
+            mkt_val: Decimal | None = None
+            if mkt_val_index is not None and mkt_val_index < len(values):
+                try:
+                    mkt_val = _parse_decimal(values[mkt_val_index])
+                except (ValueError, TypeError):
+                    mkt_val = None
+
             holdings.append(
                 SchemeHoldingItem(
                     company_name=company,
                     company_isin=isin,
                     sector=sector or None,
                     weight_percentage=weight,
+                    quantity=qty,
+                    market_value=mkt_val,
                 )
             )
+
+        # Normalize fractional weights (e.g. 0.082 -> 8.2%) if total sum <= 1.05
+        raw_weights = [h.weight_percentage for h in holdings if h.weight_percentage is not None]
+        if raw_weights and Decimal("0") < sum(raw_weights) <= Decimal("1.05"):
+            for h in holdings:
+                h.weight_percentage = h.weight_percentage * Decimal("100")
 
         portfolios.append(
             ParsedSchemePortfolio(

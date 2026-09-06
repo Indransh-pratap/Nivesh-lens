@@ -1,4 +1,5 @@
 from decimal import Decimal
+import re
 from sqlalchemy.orm import Session
 
 from app.models.holding import Holding, AssetType
@@ -40,8 +41,8 @@ def calculate_group_exposure(db: Session, holdings: list[Holding]) -> dict:
             matched_group = None
             if h.isin and h.isin.lower() in company_to_group:
                 matched_group = company_to_group[h.isin.lower()]
-            elif h.symbol and h.symbol.lower() in company_to_group:
-                matched_group = company_to_group[h.symbol.lower()]
+            elif getattr(h, "ticker", None) and str(h.ticker).lower() in company_to_group:
+                matched_group = company_to_group[str(h.ticker).lower()]
             else:
                 for k, g_name in company_to_group.items():
                     if k in h.name.lower():
@@ -56,8 +57,18 @@ def calculate_group_exposure(db: Session, holdings: list[Holding]) -> dict:
             scheme = None
             if h.isin:
                 scheme = db.query(FundScheme).filter(FundScheme.isin == h.isin).first()
-            if not scheme:
-                scheme = db.query(FundScheme).filter(FundScheme.scheme_name.ilike(f"%{h.name[:15]}%")).first()
+            if not scheme and h.name:
+                cleaned = re.sub(r"^[A-Za-z0-9]+-", "", h.name).strip()
+                clean_name = re.sub(
+                    r"\s*-\s*(Direct|Regular)?\s*(Plan)?\s*-\s*(Growth|IDCW|Dividend)?.*$",
+                    "",
+                    cleaned,
+                    flags=re.IGNORECASE,
+                ).strip()
+                if len(clean_name) >= 4:
+                    scheme = db.query(FundScheme).filter(FundScheme.scheme_name.ilike(f"%{clean_name}%")).first()
+                if not scheme and len(cleaned) >= 4:
+                    scheme = db.query(FundScheme).filter(FundScheme.scheme_name.ilike(f"%{cleaned[:20]}%")).first()
 
             lookthrough_found = False
             if scheme:

@@ -17,6 +17,8 @@ from app.schemas.phase2 import (
     GroupExposureResponse,
     SIPHealthResponse,
 )
+from app.schemas.exposure import CompanyExposureResponse
+from app.schemas.lookthrough import LookThroughResponse
 from app.services import portfolio_service
 from app.services.diagnostics.service import build_diagnostics
 from app.services.stress.simulator import run_stress_test
@@ -25,6 +27,8 @@ from app.services.correlation.engine import calculate_nav_correlation_matrix
 from app.services.benchmarking.engine import calculate_portfolio_benchmark
 from app.services.groups.exposure import calculate_group_exposure
 from app.services.sip.health import calculate_sip_health
+from app.services.exposure.company_exposure import calculate_company_exposure
+from app.services.exposure.lookthrough_service import calculate_portfolio_lookthrough
 
 router = APIRouter(prefix="/portfolios")
 
@@ -148,6 +152,32 @@ def get_group_exposure(
     except portfolio_service.PortfolioNotFoundError:
         not_found()
     return calculate_group_exposure(db, portfolio.holdings)
+
+
+@router.get("/{portfolio_id}/company-exposure", response_model=CompanyExposureResponse)
+def get_company_exposure(
+    portfolio_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+) -> CompanyExposureResponse:
+    try:
+        portfolio = portfolio_service.get_owned_portfolio(db, user_id, portfolio_id)
+    except portfolio_service.PortfolioNotFoundError:
+        not_found()
+    return calculate_company_exposure(portfolio_id=portfolio.id, holdings=portfolio.holdings, db=db)
+
+
+@router.get("/{portfolio_id}/lookthrough", response_model=LookThroughResponse)
+def get_lookthrough(
+    portfolio_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+) -> LookThroughResponse:
+    try:
+        portfolio = portfolio_service.get_owned_portfolio(db, user_id, portfolio_id)
+    except portfolio_service.PortfolioNotFoundError:
+        not_found()
+    return calculate_portfolio_lookthrough(portfolio_id=portfolio.id, holdings=portfolio.holdings, db=db)
 
 
 @router.get("/{portfolio_id}/sip-health", response_model=SIPHealthResponse)

@@ -1,18 +1,79 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { 
   Building2, 
   AlertTriangle 
 } from "lucide-react";
 import { usePortfolioStore } from "@/store/portfolioStore";
 import { InsightFlag } from "@/components/ui/InsightFlag";
+import { getGroupExposure, getPortfolios, type GroupExposureItem } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 export function ConglomerateExposure() {
-  const { conglomerates } = usePortfolioStore();
-  const [highlighted, setHighlighted] = React.useState(false);
-  const elevatedGroups = conglomerates.filter((g) => g.totalPercentage >= 14);
+  const { holdings } = usePortfolioStore();
+  const [groups, setGroups] = useState<GroupExposureItem[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [highlighted, setHighlighted] = useState(false);
+
+  const fetchGroups = useCallback(async (isCancelled: () => boolean) => {
+    try {
+      let targetId: string | undefined = undefined;
+      if (typeof window !== "undefined") {
+        targetId = localStorage.getItem("nivesh_active_portfolio_id") || undefined;
+      }
+      if (!targetId) {
+        const portfolios = await getPortfolios().catch(() => []);
+        if (portfolios && portfolios.length > 0) {
+          const active = portfolios.find((p) => p.name === "CAS Portfolio") ?? portfolios[0];
+          if (active?.id) {
+            targetId = active.id;
+            if (typeof window !== "undefined") {
+              localStorage.setItem("nivesh_active_portfolio_id", active.id);
+            }
+          }
+        }
+      }
+
+      if (targetId && !isCancelled()) {
+        const res = await getGroupExposure(targetId);
+        if (!isCancelled()) {
+          setGroups(res.groups || []);
+        }
+      }
+    } catch (err) {
+      console.warn("Could not fetch real group exposure:", err);
+    } finally {
+      if (!isCancelled()) {
+        setIsLoading(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const run = async () => {
+      await fetchGroups(() => cancelled);
+    };
+    void run();
+
+    const handlePortfolioUpdated = () => {
+      void run();
+    };
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("nivesh_portfolio_updated", handlePortfolioUpdated);
+    }
+
+    return () => {
+      cancelled = true;
+      if (typeof window !== "undefined") {
+        window.removeEventListener("nivesh_portfolio_updated", handlePortfolioUpdated);
+      }
+    };
+  }, [fetchGroups, holdings]);
+
+  const elevatedGroups = groups.filter((g) => g.exposure_percentage >= 14);
 
   const handleFix = () => {
     setHighlighted(true);
@@ -20,6 +81,17 @@ export function ConglomerateExposure() {
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
     setTimeout(() => setHighlighted(false), 3000);
   };
+
+  if (isLoading && groups.length === 0) {
+    return null;
+  }
+
+  if (groups.length === 0) {
+    return null;
+  }
+
+  // Top 2 groups combined percentage
+  const top2Pct = groups.slice(0, 2).reduce((acc, g) => acc + g.exposure_percentage, 0);
 
   return (
     <div className="rounded-2xl border border-border bg-card p-6 shadow-md text-foreground relative overflow-hidden">
@@ -35,10 +107,12 @@ export function ConglomerateExposure() {
           </div>
         </div>
 
-        <div className="px-3 py-1.5 rounded-xl border border-[var(--warning)]/20 bg-[var(--warning)]/10 text-[var(--warning)] text-xs font-semibold flex items-center gap-1.5 self-start sm:self-auto font-mono tabular-nums">
-          <AlertTriangle className="w-4 h-4" strokeWidth={1.75} />
-          <span>Top 2 Groups Hold ~32.3% Capital</span>
-        </div>
+        {top2Pct > 0 && (
+          <div className="px-3 py-1.5 rounded-xl border border-[var(--warning)]/20 bg-[var(--warning)]/10 text-[var(--warning)] text-xs font-semibold flex items-center gap-1.5 self-start sm:self-auto font-mono tabular-nums">
+            <AlertTriangle className="w-4 h-4" strokeWidth={1.75} />
+            <span>Top 2 Groups Hold ~{top2Pct.toFixed(1)}% Capital</span>
+          </div>
+        )}
       </div>
 
       {elevatedGroups.length > 0 && (
@@ -55,11 +129,11 @@ export function ConglomerateExposure() {
 
       {/* Conglomerate Cards Grid */}
       <div id="conglomerate-cards-grid" className={cn("grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-6 transition-all duration-300", highlighted && "ring-2 ring-primary p-2 rounded-2xl")}>
-        {conglomerates.map((group) => {
-          const isElevated = group.totalPercentage >= 14;
+        {groups.map((group) => {
+          const isElevated = group.exposure_percentage >= 14;
           return (
             <div 
-              key={group.id} 
+              key={group.group_name} 
               className={`p-5 rounded-2xl border transition-all duration-150 ${
                 isElevated 
                   ? "border-[var(--warning)]/20 bg-[var(--warning)]/[0.03] hover:border-[var(--warning)]/40" 
@@ -67,22 +141,22 @@ export function ConglomerateExposure() {
               }`}
             >
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-foreground truncate">{group.groupName}</span>
+                <span className="text-xs font-bold text-foreground truncate">{group.group_name}</span>
                 <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-md border ${
                   isElevated 
                     ? "bg-[var(--warning)]/10 text-[var(--warning)] border-[var(--warning)]/20" 
                     : "bg-[var(--positive)]/10 text-[var(--positive)] border-[var(--positive)]/20"
                 }`}>
-                  {group.riskStatus}
+                  {isElevated ? "Elevated" : "Normal"}
                 </span>
               </div>
 
               <div className="mt-3.5 font-mono">
                 <p className={`text-2xl font-semibold tabular-nums ${isElevated ? "text-[var(--warning)]" : "text-foreground"}`}>
-                  {group.totalPercentage.toFixed(1)}%
+                  {group.exposure_percentage.toFixed(1)}%
                 </p>
                 <p className="text-[11px] text-muted-foreground font-normal mt-0.5 tabular-nums">
-                  ₹{Math.round(group.totalValue).toLocaleString("en-IN")} total capital
+                  ₹{Math.round(group.exposure_value).toLocaleString("en-IN")} total capital
                 </p>
               </div>
 
@@ -90,18 +164,8 @@ export function ConglomerateExposure() {
               <div className="w-full h-1.5 bg-[var(--background)] rounded-full overflow-hidden mt-3">
                 <div 
                   className={`h-full rounded-full ${isElevated ? "bg-[var(--warning)]" : "bg-primary"}`}
-                  style={{ width: `${Math.min(group.totalPercentage * 3.5, 100)}%` }}
+                  style={{ width: `${Math.min(group.exposure_percentage * 3.5, 100)}%` }}
                 />
-              </div>
-
-              {/* Companies inside */}
-              <div className="mt-4 pt-3 border-t border-border/70 space-y-1.5 text-xs">
-                {group.companies.map((c) => (
-                  <div key={c.name} className="flex justify-between text-[11px] text-muted-foreground">
-                    <span className="truncate max-w-[140px] font-sans">{c.name}</span>
-                    <span className="font-mono text-foreground font-semibold tabular-nums">{c.percentage.toFixed(1)}%</span>
-                  </div>
-                ))}
               </div>
             </div>
           );
@@ -110,3 +174,5 @@ export function ConglomerateExposure() {
     </div>
   );
 }
+
+export default ConglomerateExposure;

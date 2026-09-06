@@ -2,7 +2,7 @@
 
 import React from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { LookThroughTable } from "@/components/dashboard/LookThroughTable";
+import { AmfiLookThrough } from "@/components/dashboard/AmfiLookThrough";
 import { ConglomerateExposure } from "@/components/dashboard/ConglomerateExposure";
 import { PreBuyOverlapGuard } from "@/components/dashboard/PreBuyOverlapGuard";
 
@@ -15,8 +15,8 @@ export default function PortfolioXRayPage() {
         description="Scans every mutual fund scheme disclosure to aggregate true company and corporate group exposure"
       />
 
-      {/* Look-Through Master Table */}
-      <LookThroughTable />
+      {/* AMFI Real Stock Look-Through */}
+      <AmfiLookThrough />
 
       {/* Conglomerate Exposure Breakdown */}
       <ConglomerateExposure />

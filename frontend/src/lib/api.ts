@@ -26,7 +26,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
 }
 
+import type { CompanyExposureResponse, LookThroughResponse } from "@/types";
+
 export const getPortfolios = () => request<Portfolio[]>("/portfolios");
 export const createPortfolio = (name: string) => request<Portfolio>("/portfolios", { method: "POST", body: JSON.stringify({ name }) });
 export const getPortfolio = (id: string) => request<Portfolio>(`/portfolios/${id}`);
 export const deletePortfolio = (id: string) => request<void>(`/portfolios/${id}`, { method: "DELETE" });
+export const getCompanyExposure = (id: string) => request<CompanyExposureResponse>(`/portfolios/${id}/company-exposure`);
+export const getPortfolioLookThrough = (id: string) => request<LookThroughResponse>(`/portfolios/${id}/lookthrough`);
+
+export interface GroupExposureItem {
+  group_name: string;
+  exposure_value: number;
+  exposure_percentage: number;
+}
+
+export interface GroupExposureResponse {
+  groups: GroupExposureItem[];
+  unmapped_percentage: number;
+  total_value: number;
+}
+
+export const getGroupExposure = (id: string) => request<GroupExposureResponse>(`/portfolios/${id}/group-exposure`);

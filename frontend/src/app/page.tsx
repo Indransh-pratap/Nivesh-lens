@@ -43,6 +43,21 @@ import type { Holding } from "@/types";
 /*
  * These tabs are loaded only when opened.
  */
+const TrueCompanyExposure = dynamic(
+  () =>
+    import(
+      "@/components/dashboard/TrueCompanyExposure"
+    ).then(
+      (m) => m.TrueCompanyExposure
+    ),
+  {
+    loading: () => (
+      <ChartSkeleton />
+    ),
+    ssr: false,
+  }
+);
+
 const VirtualizedTransactionTable = dynamic(
   () =>
     import(
@@ -1293,6 +1308,8 @@ export default function DashboardPage() {
 
                 <InteractiveAllocationBreakdown />
 
+                <TrueCompanyExposure />
+
                 <div className="grid md:grid-cols-2 gap-6">
                   {/* Real top holdings */}
                   <div className="p-6 rounded-2xl border border-border bg-card space-y-4">
@@ -1488,7 +1505,7 @@ export default function DashboardPage() {
         {activeTab ===
           "lookthrough" && (
           <div className="space-y-8">
-            <LookThroughTable />
+            <TrueCompanyExposure defaultExpandedFirst />
           </div>
         )}
 

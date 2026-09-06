@@ -25,6 +25,96 @@ export interface CompanyExposureItem {
   }[];
 }
 
+export interface ExposureSourceItem {
+  type: "direct" | "mutual_fund";
+  holding_name?: string;
+  isin?: string;
+  fund_name?: string;
+  fund_isin?: string;
+  fund_value?: number;
+  company_weight?: number;
+  exposure_value: number;
+  value: number;
+  as_of_date?: string;
+}
+
+export interface CompanyExposureItemDetail {
+  company_id: string;
+  company_name: string;
+  isin?: string;
+  ticker?: string;
+  sector?: string;
+  combined_value: number;
+  combined_percent: number;
+  direct_value: number;
+  direct_percent: number;
+  mutual_fund_value: number;
+  mutual_fund_percent: number;
+  sources: ExposureSourceItem[];
+}
+
+export interface CompanyExposureResponse {
+  portfolio_id: string;
+  portfolio_value: number;
+  data_as_of?: string;
+  mf_lookthrough_available: boolean;
+  total_direct_value: number;
+  total_mf_value: number;
+  companies: CompanyExposureItemDetail[];
+}
+
+export interface MFLookthroughHoldingItem {
+  company_name: string;
+  isin?: string;
+  ticker?: string;
+  sector?: string;
+  weight_percent: number;
+  exposure_value: number;
+  quantity?: number;
+  market_value?: number;
+}
+
+export interface MFLookthroughSchemeItem {
+  scheme_name: string;
+  scheme_code?: string;
+  scheme_isin?: string;
+  user_value: number;
+  lookthrough_available: boolean;
+  as_of_date?: string;
+  holdings: MFLookthroughHoldingItem[];
+}
+
+export interface ContributingFundItem {
+  fund_name: string;
+  fund_isin?: string;
+  fund_value: number;
+  weight_percent: number;
+  exposure_value: number;
+  as_of_date?: string;
+}
+
+export interface IndirectCompanyExposureItem {
+  company_id: string;
+  company_name: string;
+  isin?: string;
+  ticker?: string;
+  sector?: string;
+  total_exposure_value: number;
+  total_exposure_percent: number;
+  contributing_funds: ContributingFundItem[];
+}
+
+export interface LookThroughResponse {
+  portfolio_id: string;
+  portfolio_value: number;
+  total_mf_value: number;
+  data_as_of?: string;
+  mf_lookthrough_available: boolean;
+  mutual_funds: MFLookthroughSchemeItem[];
+  companies: IndirectCompanyExposureItem[];
+  combined_companies: CompanyExposureItemDetail[];
+}
+
 export interface ActivityLog {
   id: string;
   timestamp: string;
@@ -133,6 +223,7 @@ export interface Holding {
   sector: string;
   conglomerate?: string;
   nomineeStatus?: "Verified" | "Missing" | "Action Required";
+  assetClass?: string;
   cagr3Y?: number;
   alpha?: number;
   beta?: number;

@@ -242,7 +242,19 @@ def seed_market_baseline(db: Session) -> None:
             ("ITC Limited", "INE154A01025", "FMCG", Decimal("4.50")),
             ("Tata Motors", "INE155A01022", "Automobile", Decimal("4.20")),
             ("Mahindra & Mahindra", "INE101A01026", "Automobile", Decimal("3.80")),
-        ]
+        ],
+        "118834": [
+            ("HDFC Bank", "INE040A01034", "Banking", Decimal("9.15")),
+            ("ICICI Bank", "INE090A01021", "Banking", Decimal("7.85")),
+            ("Reliance Industries", "INE002A01018", "Oil & Gas", Decimal("6.90")),
+            ("Infosys", "INE009A01021", "IT", Decimal("5.75")),
+            ("Tata Consultancy Services", "INE467B01029", "IT", Decimal("4.80")),
+            ("Axis Bank", "INE238A01034", "Banking", Decimal("3.95")),
+            ("Larsen & Toubro", "INE018A01030", "Engineering", Decimal("3.60")),
+            ("Bharti Airtel", "INE397D01024", "Telecom", Decimal("3.40")),
+            ("State Bank of India", "INE062A01020", "Banking", Decimal("3.10")),
+            ("ITC Limited", "INE154A01025", "FMCG", Decimal("2.80")),
+        ],
     }
 
     for code, h_list in holdings_data.items():

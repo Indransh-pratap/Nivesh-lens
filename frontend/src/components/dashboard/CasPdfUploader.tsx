@@ -40,6 +40,9 @@ type ApiError = {
 };
 
 type CasResponse = {
+  portfolio_id?: string;
+  portfolioId?: string;
+
   holdings_count?: number;
   holdingsCount?: number;
 
@@ -240,15 +243,27 @@ function normalizeHolding(
       : String(item.assetClass);
 
   const underlyingHoldings =
-    Array.isArray(
-      item.underlyingHoldings
-    )
+    Array.isArray(item.underlyingHoldings)
       ? item.underlyingHoldings
-      : Array.isArray(
-            item.underlying_holdings
-          )
+      : Array.isArray(item.underlying_holdings)
         ? item.underlying_holdings
         : undefined;
+
+  const rawAssetType = String(
+    item.asset_type ?? item.assetType ?? ""
+  ).toUpperCase();
+
+  const isMF =
+    rawAssetType.includes("MUTUAL") ||
+    rawAssetType === "MUTUAL_FUND" ||
+    name.toLowerCase().includes("fund") ||
+    name.toLowerCase().includes("growth") ||
+    name.toLowerCase().includes("direct plan");
+  const isStock =
+    rawAssetType.includes("STOCK") ||
+    rawAssetType.includes("EQUITY") ||
+    rawAssetType === "STOCK";
+  const type: Holding["type"] = isMF ? "Mutual Fund" : isStock ? "Stock" : "Mutual Fund";
 
   return {
     ...(item as Partial<Holding>),
@@ -259,30 +274,30 @@ function normalizeHolding(
         : String(item.id),
 
     name,
-
+    type,
     ticker,
-
     isin,
 
     units,
+    quantity: units,
 
     averageCost,
+    avgPrice: averageCost,
 
     currentValue,
-
     currentPrice,
 
     returns,
-
     returnsValue,
 
     planType,
-
     expenseRatio,
-
     riskGrade,
-
     assetClass,
+
+    sector: isMF ? "Diversified MF" : "Equity",
+    nomineeStatus: "Verified",
+    allocation: 0,
 
     underlyingHoldings:
       underlyingHoldings as Holding["underlyingHoldings"],
@@ -321,7 +336,7 @@ function getImportedHoldings(
       (items) => items.length > 0
     ) ?? [];
 
-  return source
+  const list = source
     .map((item, index) =>
       normalizeHolding(
         item,
@@ -334,6 +349,12 @@ function getImportedHoldings(
       ): item is Holding =>
         item !== null
     );
+
+  const totalVal = list.reduce((sum, h) => sum + h.currentValue, 0);
+  return list.map((h) => ({
+    ...h,
+    allocation: totalVal > 0 ? (h.currentValue / totalVal) * 100 : 0,
+  }));
 }
 
 function getHoldingsCount(
@@ -854,6 +875,23 @@ export function CasPdfUploader({
           console.warn(
             "CAS backend returned holdings_count but no holdings array.",
             payload
+          );
+        }
+
+        const returnedPortfolioId =
+          payload.portfolio_id ?? payload.portfolioId;
+        if (
+          returnedPortfolioId &&
+          typeof window !== "undefined"
+        ) {
+          localStorage.setItem(
+            "nivesh_active_portfolio_id",
+            returnedPortfolioId
+          );
+          window.dispatchEvent(
+            new CustomEvent("nivesh_portfolio_updated", {
+              detail: { portfolioId: returnedPortfolioId },
+            })
           );
         }
 

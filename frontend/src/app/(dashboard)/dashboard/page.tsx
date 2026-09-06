@@ -35,8 +35,58 @@ import { CountUp } from "@/components/ui/CountUp";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { OnboardingTour } from "@/components/dashboard/OnboardingTour";
 import { cn } from "@/lib/utils";
-import { AMFIPortfolioUploader } from "@/components/dashboard/AMFIPortfolioUploader";
 import type { Holding } from "@/types";
+
+const AMFIPortfolioUploader =
+  dynamic(
+    () =>
+      import(
+        "@/components/dashboard/AMFIPortfolioUploader"
+      ).then(
+        (m) =>
+          m.AMFIPortfolioUploader
+      ),
+    {
+      loading: () => (
+        <ChartSkeleton />
+      ),
+      ssr: false,
+    }
+  );
+
+const TrueCompanyExposure =
+  dynamic(
+    () =>
+      import(
+        "@/components/dashboard/TrueCompanyExposure"
+      ).then(
+        (m) =>
+          m.TrueCompanyExposure
+      ),
+    {
+      loading: () => (
+        <ChartSkeleton />
+      ),
+      ssr: false,
+    }
+  );
+
+const AmfiLookThrough =
+  dynamic(
+    () =>
+      import(
+        "@/components/dashboard/AmfiLookThrough"
+      ).then(
+        (m) =>
+          m.AmfiLookThrough
+      ),
+    {
+      loading: () => (
+        <ChartSkeleton />
+      ),
+      ssr: false,
+    }
+  );
 
 const VirtualizedTransactionTable =
   dynamic(
@@ -284,15 +334,28 @@ function normalizeHolding(
   item: ApiHolding,
   index: number
 ): Holding {
-  const assetType =
+  const rawAssetType = String(
     item.asset_type ??
     item.assetType ??
-    "UNKNOWN";
+    ""
+  ).toUpperCase();
 
-  const assetClass =
+  const assetClass = String(
     item.asset_class ??
     item.assetClass ??
-    "Equity";
+    "Equity"
+  );
+
+  const isMF = rawAssetType.includes("MUTUAL") || rawAssetType === "MUTUAL_FUND";
+  const isStock = rawAssetType.includes("STOCK") || rawAssetType.includes("EQUITY") || rawAssetType === "STOCK";
+  const type: Holding["type"] = isMF ? "Mutual Fund" : isStock ? "Stock" : "Stock";
+
+  const quantity = toNumber(item.quantity ?? item.units);
+  const avgCost = toNumber(item.average_price ?? item.averageCost);
+  const curVal = toNumber(item.current_value ?? item.currentValue);
+  const curPrice = toNumber(item.current_price ?? item.currentPrice);
+  const returnsVal = toNumber(item.returns_value ?? item.returnsValue);
+  const returnsPct = toNumber(item.returns);
 
   return {
     id:
@@ -303,6 +366,8 @@ function normalizeHolding(
       item.name ??
       "Unnamed Holding",
 
+    type,
+
     ticker:
       item.ticker ??
       item.isin?.slice(0, 6) ??
@@ -312,44 +377,26 @@ function normalizeHolding(
       item.isin ??
       undefined,
 
-    units: toNumber(
-      item.quantity ??
-        item.units
-    ),
+    quantity,
+    units: quantity,
 
-    averageCost:
-      toNumber(
-        item.average_price ??
-          item.averageCost
-      ),
+    avgPrice: avgCost,
+    averageCost: avgCost,
 
-    currentValue:
-      toNumber(
-        item.current_value ??
-          item.currentValue
-      ),
+    currentValue: curVal,
 
-    currentPrice:
-      toNumber(
-        item.current_price ??
-          item.currentPrice
-      ),
+    currentPrice: curPrice,
 
-    returns:
-      toNumber(
-        item.returns
-      ),
+    returns: returnsPct,
 
-    returnsValue:
-      toNumber(
-        item.returns_value ??
-          item.returnsValue
-      ),
+    returnsValue: returnsVal,
+
+    allocation: 0, // Will be computed dynamically against total portfolio value
 
     planType:
-      item.plan_type ??
-      item.planType ??
-      "Direct",
+      item.plan_type === "Regular" || item.planType === "Regular"
+        ? "Regular"
+        : "Direct",
 
     expenseRatio:
       toNumber(
@@ -358,9 +405,15 @@ function normalizeHolding(
       ),
 
     riskGrade:
-      item.risk_grade ??
-      item.riskGrade ??
-      "Low",
+      item.risk_grade === "High" || item.riskGrade === "High"
+        ? "High"
+        : item.risk_grade === "Medium" || item.riskGrade === "Medium"
+          ? "Medium"
+          : "Low",
+
+    sector: isMF ? "Diversified MF" : "Equity",
+
+    nomineeStatus: "Verified",
 
     assetClass,
 
@@ -479,10 +532,15 @@ export default function DashboardPage() {
           }
 
           /*
-           * Use CAS Portfolio if it exists.
-           * Otherwise use most recent portfolio.
+           * Check if user has an active portfolio selected or recently imported.
+           * Otherwise use "CAS Portfolio" or first portfolio in list.
            */
+          const storedId = typeof window !== "undefined"
+            ? localStorage.getItem("nivesh_active_portfolio_id")
+            : null;
+
           const portfolio =
+            (storedId ? data.find((item) => item.id === storedId) : null) ??
             data.find(
               (item) =>
                 item.name ===
@@ -497,7 +555,11 @@ export default function DashboardPage() {
             return;
           }
 
-          const remoteHoldings =
+          if (typeof window !== "undefined" && portfolio.id) {
+            localStorage.setItem("nivesh_active_portfolio_id", portfolio.id);
+          }
+
+          const rawRemoteHoldings =
             Array.isArray(
               portfolio.holdings
             )
@@ -512,6 +574,16 @@ export default function DashboardPage() {
                     )
                 )
               : [];
+
+          const portTotalVal = rawRemoteHoldings.reduce(
+            (sum, h) => sum + (Number(h.currentValue) || 0),
+            0
+          );
+
+          const remoteHoldings = rawRemoteHoldings.map((h) => ({
+            ...h,
+            allocation: portTotalVal > 0 ? (Number(h.currentValue) / portTotalVal) * 100 : 0,
+          }));
 
           console.log(
             "Loaded portfolio:",
@@ -577,9 +649,18 @@ export default function DashboardPage() {
       handleFocus
     );
 
+    window.addEventListener(
+      "nivesh_portfolio_updated",
+      handleFocus
+    );
+
     return () => {
       window.removeEventListener(
         "focus",
+        handleFocus
+      );
+      window.removeEventListener(
+        "nivesh_portfolio_updated",
         handleFocus
       );
     };
@@ -1207,6 +1288,8 @@ export default function DashboardPage() {
 
               <InteractiveAllocationBreakdown />
 
+              <TrueCompanyExposure />
+
               <div className="grid md:grid-cols-2 gap-6">
 
                 {/* Real holdings */}
@@ -1356,7 +1439,10 @@ export default function DashboardPage() {
 
       {activeTab ===
         "lookthrough" && (
-        <LookThroughTable />
+        <div className="space-y-8">
+          <AmfiLookThrough />
+          <TrueCompanyExposure defaultExpandedFirst />
+        </div>
       )}
 
       {activeTab ===

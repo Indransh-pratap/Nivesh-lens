@@ -1,7 +1,7 @@
 
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import {
   Search,
@@ -19,20 +19,144 @@ import {
   Filter,
 } from "lucide-react";
 import { usePortfolioStore } from "@/store/portfolioStore";
+import { Holding } from "@/types";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { TableRowSkeleton } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 
 export default function HoldingsPage() {
-  const { holdings } = usePortfolioStore();
+  const { holdings, setHoldings } = usePortfolioStore();
 
   const [isLoading, setIsLoading] = useState(true);
 
+  const loadPortfolio = useCallback(async () => {
+    try {
+      const response = await fetch("/api/portfolio/portfolios", {
+        method: "GET",
+        credentials: "include",
+        cache: "no-store",
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      if (!Array.isArray(data) || data.length === 0) return;
+
+      const storedId =
+        typeof window !== "undefined"
+          ? localStorage.getItem("nivesh_active_portfolio_id")
+          : null;
+      const portfolio =
+        (storedId ? data.find((p: any) => p.id === storedId) : null) ??
+        data.find((p: any) => p.name === "CAS Portfolio") ??
+        data[0];
+
+      if (!portfolio || !Array.isArray(portfolio.holdings)) return;
+
+      if (typeof window !== "undefined" && portfolio.id) {
+        localStorage.setItem("nivesh_active_portfolio_id", portfolio.id);
+      }
+
+      const rawItems = portfolio.holdings.map((item: any, index: number) => {
+        const rawAssetType = String(
+          item.asset_type ?? item.assetType ?? ""
+        ).toUpperCase();
+        const assetClass = String(
+          item.asset_class ?? item.assetClass ?? "Equity"
+        );
+        const isMF =
+          rawAssetType.includes("MUTUAL") ||
+          rawAssetType === "MUTUAL_FUND" ||
+          (item.name && item.name.toLowerCase().includes("fund"));
+        const isStock =
+          rawAssetType.includes("STOCK") ||
+          rawAssetType.includes("EQUITY") ||
+          rawAssetType === "STOCK";
+        const type: Holding["type"] = isMF
+          ? "Mutual Fund"
+          : isStock
+            ? "Stock"
+            : "Mutual Fund";
+        const qty = Number(item.quantity ?? item.units) || 0;
+        const avgCost =
+          Number(
+            item.average_price ?? item.averageCost ?? item.average_cost
+          ) || 0;
+        const curVal =
+          Number(item.current_value ?? item.currentValue) || 0;
+        const curPrice =
+          Number(item.current_price ?? item.currentPrice) || 0;
+        const returnsVal =
+          Number(item.returns_value ?? item.returnsValue) || 0;
+        const returnsPct = Number(item.returns) || 0;
+
+        return {
+          id: item.id ?? `holding_${index}`,
+          name: item.name ?? "Unnamed Holding",
+          type,
+          ticker: item.ticker ?? item.isin?.slice(0, 6) ?? `H${index + 1}`,
+          isin: item.isin ?? undefined,
+          quantity: qty,
+          units: qty,
+          avgPrice: avgCost,
+          averageCost: avgCost,
+          currentValue: curVal,
+          currentPrice: curPrice,
+          returns: returnsPct,
+          returnsValue: returnsVal,
+          allocation: 0,
+          planType:
+            item.plan_type === "Regular" || item.planType === "Regular"
+              ? "Regular"
+              : "Direct",
+          expenseRatio:
+            Number(item.expense_ratio ?? item.expenseRatio) || 0,
+          riskGrade:
+            item.risk_grade === "High" || item.riskGrade === "High"
+              ? "High"
+              : item.risk_grade === "Medium" || item.riskGrade === "Medium"
+                ? "Medium"
+                : "Low",
+          sector: isMF ? "Diversified MF" : "Equity",
+          nomineeStatus: "Verified",
+          assetClass,
+        } as Holding;
+      });
+
+      const totalVal = rawItems.reduce(
+        (sum: number, h: Holding) => sum + h.currentValue,
+        0
+      );
+      const normalized = rawItems.map((h: Holding) => ({
+        ...h,
+        allocation: totalVal > 0 ? (h.currentValue / totalVal) * 100 : 0,
+      }));
+
+      setHoldings(normalized);
+    } catch (err) {
+      console.warn("Could not load holdings portfolio:", err);
+    }
+  }, [setHoldings]);
+
   useEffect(() => {
-    const t = setTimeout(() => setIsLoading(false), 350);
-    return () => clearTimeout(t);
-  }, []);
+    if (holdings.length === 0) {
+      void loadPortfolio().finally(() => setIsLoading(false));
+    } else {
+      setIsLoading(false);
+    }
+
+    const handleUpdated = () => {
+      void loadPortfolio();
+    };
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("nivesh_portfolio_updated", handleUpdated);
+    }
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("nivesh_portfolio_updated", handleUpdated);
+      }
+    };
+  }, [holdings.length, loadPortfolio]);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<string>("All");
@@ -56,15 +180,18 @@ export default function HoldingsPage() {
       const matchSearch =
         h.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         h.ticker.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        h.sector.toLowerCase().includes(searchQuery.toLowerCase());
+        (h.sector && h.sector.toLowerCase().includes(searchQuery.toLowerCase()));
 
       let matchFilter = true;
 
-      if (activeFilter === "Stock") matchFilter = h.type === "Stock";
+      if (activeFilter === "Stock")
+        matchFilter = h.type === "Stock" || (!h.type && h.assetClass === "Equity");
       else if (activeFilter === "Mutual Fund")
-        matchFilter = h.type === "Mutual Fund";
+        matchFilter =
+          h.type === "Mutual Fund" ||
+          (!h.type && (h.assetClass?.includes("Mutual") || h.name.toLowerCase().includes("fund")));
       else if (activeFilter === "Direct")
-        matchFilter = h.planType === "Direct";
+        matchFilter = h.planType === "Direct" || !h.planType;
       else if (activeFilter === "Regular")
         matchFilter = h.planType === "Regular";
       else if (activeFilter === "FD") matchFilter = h.type === "FD";
@@ -79,13 +206,52 @@ export default function HoldingsPage() {
       return a.name.localeCompare(b.name);
     });
 
+  // Calculate dynamic summary stats
+  const totalValue = holdings.reduce(
+    (sum, h) => sum + (Number(h.currentValue) || 0),
+    0
+  );
+  const totalGain = holdings.reduce(
+    (sum, h) => sum + (Number(h.returnsValue) || 0),
+    0
+  );
+  const totalInvested = totalValue - totalGain;
+  const gainPercent =
+    totalInvested > 0 ? (totalGain / totalInvested) * 100 : 0;
+
+  const stockCount = holdings.filter(
+    (h) => h.type === "Stock" || (!h.type && h.assetClass === "Equity")
+  ).length;
+  const mfCount = holdings.filter(
+    (h) =>
+      h.type === "Mutual Fund" ||
+      (!h.type && (h.assetClass?.includes("Mutual") || h.name.toLowerCase().includes("fund")))
+  ).length;
+
+  const regularHoldings = holdings.filter((h) => h.planType === "Regular");
+  const regularCount = regularHoldings.length;
+  const regularDrag = regularHoldings.reduce((sum, h) => {
+    const expense = Number(h.expenseRatio) || 1.25;
+    return sum + (Number(h.currentValue) || 0) * (expense / 100);
+  }, 0);
+
+  const verifiedNomineeCount = holdings.filter(
+    (h) => (h.nomineeStatus || "Verified") === "Verified"
+  ).length;
+  const nomineePercent =
+    holdings.length > 0
+      ? Math.round((verifiedNomineeCount / holdings.length) * 100)
+      : 100;
+  const unverifiedNomineeCount = holdings.length - verifiedNomineeCount;
+
   // Calculate 52-week ranges dynamically for visual representation
   const get52WRange = (currentPrice: number) => {
-    const low = currentPrice * 0.72;
-    const high = currentPrice * 1.28;
+    const safePrice = Number(currentPrice) || 100;
+    const low = safePrice * 0.72;
+    const high = safePrice * 1.28;
     const progress = Math.min(
       100,
-      Math.max(5, ((currentPrice - low) / (high - low)) * 100)
+      Math.max(5, ((safePrice - low) / (high - low)) * 100)
     );
 
     return { low, high, progress };
@@ -149,12 +315,23 @@ export default function HoldingsPage() {
           </span>
 
           <p className="text-xl sm:text-2xl font-bold font-finance text-foreground mt-1 tabular-nums">
-            ₹34,80,000
+            ₹{totalValue.toLocaleString("en-IN")}
           </p>
 
-          <span className="text-[11px] text-[var(--positive)] font-finance flex items-center gap-1 mt-0.5">
-            <TrendingUp className="w-3 h-3" />
-            +17.72% (+₹5.24L)
+          <span
+            className={cn(
+              "text-[11px] font-finance flex items-center gap-1 mt-0.5",
+              gainPercent >= 0 ? "text-[var(--positive)]" : "text-[var(--negative)]"
+            )}
+          >
+            {gainPercent >= 0 ? (
+              <TrendingUp className="w-3 h-3" />
+            ) : (
+              <TrendingDown className="w-3 h-3" />
+            )}
+            {gainPercent >= 0 ? "+" : ""}
+            {gainPercent.toFixed(2)}% ({gainPercent >= 0 ? "+" : ""}₹
+            {Math.abs(Math.round(totalGain)).toLocaleString("en-IN")})
           </span>
         </div>
 
@@ -168,7 +345,7 @@ export default function HoldingsPage() {
           </p>
 
           <span className="text-[11px] text-muted-foreground">
-            6 Direct Equities · 8 Funds
+            {stockCount} Direct Equities · {mfCount} Funds
           </span>
         </div>
 
@@ -177,12 +354,19 @@ export default function HoldingsPage() {
             Regular Plans Flagged
           </span>
 
-          <p className="text-xl sm:text-2xl font-bold font-finance text-[var(--negative)] mt-1 tabular-nums">
-            3 Schemes
+          <p
+            className={cn(
+              "text-xl sm:text-2xl font-bold font-finance mt-1 tabular-nums",
+              regularCount > 0
+                ? "text-[var(--negative)]"
+                : "text-[var(--positive)]"
+            )}
+          >
+            {regularCount} Schemes
           </p>
 
           <span className="text-[11px] text-muted-foreground">
-            Annual Drag: ₹16,600
+            Annual Drag: ₹{Math.round(regularDrag).toLocaleString("en-IN")}
           </span>
         </div>
 
@@ -191,12 +375,23 @@ export default function HoldingsPage() {
             Nominee Compliance
           </span>
 
-          <p className="text-xl sm:text-2xl font-bold font-finance text-[var(--positive)] mt-1 tabular-nums">
-            85% Verified
+          <p
+            className={cn(
+              "text-xl sm:text-2xl font-bold font-finance mt-1 tabular-nums",
+              nomineePercent >= 80
+                ? "text-[var(--positive)]"
+                : "text-amber-500"
+            )}
+          >
+            {nomineePercent}% Verified
           </p>
 
           <span className="text-[11px] text-muted-foreground">
-            2 Folios Need Update
+            {unverifiedNomineeCount === 0
+              ? "All Folios Compliant"
+              : `${unverifiedNomineeCount} Folio${
+                  unverifiedNomineeCount > 1 ? "s" : ""
+                } Need Update`}
           </span>
         </div>
       </div>
@@ -593,6 +788,15 @@ export default function HoldingsPage() {
                     ? selectedHolding.avgPrice
                     : 0;
 
+                const investedAmount =
+                  avgPrice > 0 && selectedHolding.quantity > 0
+                    ? avgPrice * selectedHolding.quantity
+                    : Math.max(
+                        0,
+                        selectedHolding.currentValue -
+                          (selectedHolding.returnsValue || 0)
+                      );
+
                 return (
                   <>
                     {/* Financial Snapshot */}
@@ -617,9 +821,7 @@ export default function HoldingsPage() {
 
                         <span className="text-base font-bold font-finance text-foreground tabular-nums">
                           ₹
-                          {(avgPrice * selectedHolding.quantity).toLocaleString(
-                            "en-IN"
-                          )}
+                          {Math.round(investedAmount).toLocaleString("en-IN")}
                         </span>
                       </div>
 

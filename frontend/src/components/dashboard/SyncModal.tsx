@@ -18,6 +18,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { usePortfolioStore } from "@/store/portfolioStore";
+import { Holding } from "@/types";
 import { Button } from "@/components/ui/Button";
 import { IconButton } from "@/components/ui/IconButton";
 import { useDialogA11y } from "@/lib/useDialogA11y";
@@ -215,8 +216,62 @@ export function SyncModal() {
         throw new Error("No investment records were found in this CAS statement.");
       }
 
-      if (data?.holdings && data.holdings.length > 0) {
-        usePortfolioStore.getState().setHoldings(data.holdings);
+      const rawList = Array.isArray(data?.holdings) ? data.holdings : [];
+      const normalizedList: Holding[] = rawList.map((item: any, idx: number) => {
+        const rawAssetType = String(item.asset_type ?? item.assetType ?? "").toUpperCase();
+        const name = String(item.name ?? item.schemeName ?? item.scheme_name ?? "Imported Holding").trim();
+        const isMF = rawAssetType.includes("MUTUAL") || rawAssetType === "MUTUAL_FUND" || name.toLowerCase().includes("fund") || name.toLowerCase().includes("growth") || name.toLowerCase().includes("direct plan");
+        const isStock = rawAssetType.includes("STOCK") || rawAssetType.includes("EQUITY") || rawAssetType === "STOCK";
+        const type: Holding["type"] = isMF ? "Mutual Fund" : isStock ? "Stock" : "Mutual Fund";
+        const curVal = Number(item.currentValue ?? item.current_value) || 0;
+        const qty = Number(item.quantity ?? item.units) || 0;
+        const avgCost = Number(item.averageCost ?? item.average_cost ?? item.average_price ?? item.avgPrice) || 0;
+        const curPrice = Number(item.currentPrice ?? item.current_price) || 0;
+        const returnsVal = Number(item.returnsValue ?? item.returns_value) || 0;
+        const returnsPct = Number(item.returns) || 0;
+
+        return {
+          id: String(item.id ?? `cas_${Date.now()}_${idx}`),
+          name,
+          type,
+          ticker: String(item.ticker ?? item.isin?.slice(0, 6) ?? `CAS_${idx + 1}`),
+          isin: item.isin ? String(item.isin) : undefined,
+          quantity: qty,
+          units: qty,
+          avgPrice: avgCost,
+          averageCost: avgCost,
+          currentValue: curVal,
+          currentPrice: curPrice,
+          returns: returnsPct,
+          returnsValue: returnsVal,
+          allocation: 0,
+          planType: item.planType === "Regular" || item.plan_type === "Regular" ? "Regular" : "Direct",
+          expenseRatio: Number(item.expenseRatio ?? item.expense_ratio) || 0,
+          riskGrade: item.riskGrade === "High" || item.risk_grade === "High" ? "High" : item.riskGrade === "Medium" || item.risk_grade === "Medium" ? "Medium" : "Low",
+          sector: isMF ? "Diversified MF" : "Equity",
+          nomineeStatus: "Verified",
+          assetClass: String(item.assetClass ?? item.asset_class ?? "Equity"),
+        } as Holding;
+      });
+
+      const totalVal = normalizedList.reduce((sum: number, h: Holding) => sum + h.currentValue, 0);
+      const importedHoldings = normalizedList.map((h: Holding) => ({
+        ...h,
+        allocation: totalVal > 0 ? (h.currentValue / totalVal) * 100 : 0,
+      }));
+
+      if (importedHoldings.length > 0) {
+        usePortfolioStore.getState().setHoldings(importedHoldings);
+      }
+
+      const returnedPortfolioId = data?.portfolio_id ?? data?.portfolioId;
+      if (returnedPortfolioId && typeof window !== "undefined") {
+        localStorage.setItem("nivesh_active_portfolio_id", returnedPortfolioId);
+        window.dispatchEvent(
+          new CustomEvent("nivesh_portfolio_updated", {
+            detail: { portfolioId: returnedPortfolioId },
+          })
+        );
       }
 
       setCasProgress(100);

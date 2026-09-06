@@ -106,6 +106,8 @@ class SchemeHolding(Base):
     company_isin: Mapped[str | None] = mapped_column(String(12), index=True)
     sector: Mapped[str | None] = mapped_column(String(100))
     weight_percentage: Mapped[Decimal] = mapped_column(Numeric(8, 4), nullable=False)
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
+    market_value: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
 
     scheme: Mapped["FundScheme"] = relationship(back_populates="holdings")
 

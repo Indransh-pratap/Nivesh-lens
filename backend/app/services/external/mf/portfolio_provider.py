@@ -4,11 +4,21 @@ from decimal import Decimal
 
 
 class SchemeHoldingItem:
-    def __init__(self, company_name: str, company_isin: str | None, sector: str | None, weight_percentage: Decimal):
+    def __init__(
+        self,
+        company_name: str,
+        company_isin: str | None,
+        sector: str | None,
+        weight_percentage: Decimal,
+        quantity: Decimal | None = None,
+        market_value: Decimal | None = None,
+    ):
         self.company_name = company_name
         self.company_isin = company_isin
         self.sector = sector
         self.weight_percentage = weight_percentage
+        self.quantity = quantity
+        self.market_value = market_value
 
 
 class PortfolioDisclosureProvider(ABC):

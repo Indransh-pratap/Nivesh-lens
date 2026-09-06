@@ -2,7 +2,8 @@
 
 import React from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { LookThroughTable } from "@/components/dashboard/LookThroughTable";
+import { AmfiLookThrough } from "@/components/dashboard/AmfiLookThrough";
+import { TrueCompanyExposure } from "@/components/dashboard/TrueCompanyExposure";
 import { ConglomerateExposure } from "@/components/dashboard/ConglomerateExposure";
 
 export default function ExposurePage() {
@@ -14,7 +15,8 @@ export default function ExposurePage() {
         description="Detects double-dipping and aggregated corporate house concentration"
       />
 
-      <LookThroughTable />
+      <AmfiLookThrough />
+      <TrueCompanyExposure defaultExpandedFirst />
       <ConglomerateExposure />
     </div>
   );
