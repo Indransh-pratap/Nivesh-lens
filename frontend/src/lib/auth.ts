@@ -34,12 +34,19 @@ export const auth = betterAuth({
 
   baseURL:
     process.env.BETTER_AUTH_URL ||
-    "http://localhost:3000",
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000"),
 
   secret: betterAuthSecret,
 
   trustedOrigins: [
     "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    ...(process.env.BETTER_AUTH_URL ? [process.env.BETTER_AUTH_URL] : []),
+    ...(process.env.VERCEL_URL ? [`https://${process.env.VERCEL_URL}`] : []),
+    ...(process.env.NEXT_PUBLIC_APP_URL ? [process.env.NEXT_PUBLIC_APP_URL] : []),
+    // Wildcard match for all Vercel deployments (*.vercel.app)
+    "https://*.vercel.app",
+    "https://nivesh-lens.vercel.app",
   ],
 
   emailAndPassword: {
