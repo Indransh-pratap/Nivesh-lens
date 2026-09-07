@@ -9,6 +9,8 @@ import {
 } from "lucide-react";
 import { usePortfolioStore } from "@/store/portfolioStore";
 import { Button } from "@/components/ui/Button";
+import { EmptyState } from "@/components/ui/EmptyState";
+import type { ClientProfile } from "@/types";
 
 export function AdvisorWhiteLabelPDF() {
   const { 
@@ -17,12 +19,34 @@ export function AdvisorWhiteLabelPDF() {
     advisorClients, 
     selectedClientId, 
     setSelectedClient,
-    companyExposures
+    companyExposures,
+    holdings,
+    openSyncModal
   } = usePortfolioStore();
 
   const [isCustomizing, setIsCustomizing] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
-  const selectedClient = advisorClients.find(c => c.id === selectedClientId) || advisorClients[0];
+
+  if (holdings.length === 0 && advisorClients.length === 0) {
+    return (
+      <EmptyState
+        icon={FileCheck2}
+        title="No client portfolio loaded"
+        description="Upload a client CAS statement or connect a portfolio to generate co-branded white-label audit reports with your firm logo and ARN."
+        actionLabel="Connect Portfolio"
+        onAction={() => openSyncModal("CAS")}
+      />
+    );
+  }
+
+  const selectedClient: ClientProfile = advisorClients.find(c => c.id === selectedClientId) || advisorClients[0] || {
+    id: "active_client",
+    name: "Active Portfolio",
+    panMasked: "CAS-VERIFIED",
+    portfolioValue: holdings.reduce((s, h) => s + (Number(h.currentValue) || 0), 0),
+    healthScore: 780,
+    topHolding: holdings[0]?.name || "N/A",
+  };
 
   const handlePrint = () => {
     window.print();
@@ -169,22 +193,24 @@ export function AdvisorWhiteLabelPDF() {
       )}
 
       {/* Client Switcher Tabs */}
-      <div className="mt-5 flex items-center gap-2 overflow-x-auto pb-1">
-        <span className="text-xs font-semibold text-muted-foreground shrink-0">Client Portfolio:</span>
-        {advisorClients.map((c) => (
-          <button
-            key={c.id}
-            onClick={() => setSelectedClient(c.id)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all shrink-0 cursor-pointer ${
-              selectedClientId === c.id 
-                ? "bg-primary text-white font-semibold shadow-sm" 
-                : "bg-accent text-muted-foreground hover:text-foreground border border-border/70"
-            }`}
-          >
-            {c.name} (₹{Math.round(c.portfolioValue / 100000)}L)
-          </button>
-        ))}
-      </div>
+      {advisorClients.length > 1 && (
+        <div className="mt-5 flex items-center gap-2 overflow-x-auto pb-1">
+          <span className="text-xs font-semibold text-muted-foreground shrink-0">Client Portfolio:</span>
+          {advisorClients.map((c) => (
+            <button
+              key={c.id}
+              onClick={() => setSelectedClient(c.id)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-medium transition-all shrink-0 cursor-pointer ${
+                selectedClientId === c.id 
+                  ? "bg-primary text-white font-semibold shadow-sm" 
+                  : "bg-accent text-muted-foreground hover:text-foreground border border-border/70"
+              }`}
+            >
+              {c.name} (₹{Math.round(c.portfolioValue / 100000)}L)
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Printable Co-Branded Audit Document Preview (A4 styled) */}
       <div id="printable-audit-report" className="mt-6 p-8 rounded-2xl border border-border bg-[var(--background)] text-white shadow-2xl space-y-6 font-sans">

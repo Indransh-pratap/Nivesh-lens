@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { usePortfolioStore } from "@/store/portfolioStore";
 import { cn } from "@/lib/utils";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 interface OverlapSearchItem {
   id: string;
@@ -29,22 +30,23 @@ interface OverlapSearchItem {
   projectedWeightIncrease: string;
 }
 
-const EXTENDED_OVERLAP_DATABASE: OverlapSearchItem[] = [
+interface CandidateTemplate {
+  id: string;
+  name: string;
+  type: "Mutual Fund" | "Stock" | "IPO" | "NFO";
+  category: string;
+  currentPriceOrNAV: string;
+  underlyingCheckStocks: string[];
+}
+
+const CANDIDATE_TEMPLATES: CandidateTemplate[] = [
   {
     id: "item_ppfc",
     name: "Parag Parikh Flexi Cap Fund",
     type: "Mutual Fund",
     category: "Flexi Cap Equity",
     currentPriceOrNAV: "NAV: ₹78.45",
-    overlapPercent: 38.5,
-    verdict: "Moderate Overlap (Proceed with Caution)",
-    overlappingHoldings: [
-      { holdingName: "HDFC Bank Ltd.", viaFund: "Direct Equity + Mirae Large Cap", existingExposurePercent: 15.87 },
-      { holdingName: "ITC Ltd.", viaFund: "Direct Equity", existingExposurePercent: 4.2 },
-      { holdingName: "Bajaj Holdings", viaFund: "PPFC Underlying", existingExposurePercent: 3.1 }
-    ],
-    rationale: "You already hold 15.87% in HDFC Bank. Adding Parag Parikh Flexi Cap will increase your total HDFC Bank concentration to ~18.4%, slightly above the recommended single-stock ceiling.",
-    projectedWeightIncrease: "+2.53% added to HDFC Bank"
+    underlyingCheckStocks: ["HDFC Bank", "ITC", "Bajaj Holdings", "ICICI Bank", "Axis Bank"],
   },
   {
     id: "item_quant_small",
@@ -52,14 +54,7 @@ const EXTENDED_OVERLAP_DATABASE: OverlapSearchItem[] = [
     type: "Mutual Fund",
     category: "Small Cap Equity",
     currentPriceOrNAV: "NAV: ₹245.10",
-    overlapPercent: 8.2,
-    verdict: "Safe to Buy (Low Overlap)",
-    overlappingHoldings: [
-      { holdingName: "Reliance Industries", viaFund: "Direct Stock", existingExposurePercent: 14.64 },
-      { holdingName: "Bikaji Foods", viaFund: "Quant Small Cap", existingExposurePercent: 2.1 }
-    ],
-    rationale: "Minimal 8.2% overlap with your existing large-cap centric portfolio. Adding this fund will introduce fresh small-cap alpha without duplicating your existing bluechip holdings.",
-    projectedWeightIncrease: "High diversification bonus"
+    underlyingCheckStocks: ["Reliance Industries", "Bikaji", "Jio Financial"],
   },
   {
     id: "item_tatamotors",
@@ -67,14 +62,7 @@ const EXTENDED_OVERLAP_DATABASE: OverlapSearchItem[] = [
     type: "Stock",
     category: "Automotive & EV",
     currentPriceOrNAV: "LTP: ₹1,085.40",
-    overlapPercent: 6.8,
-    verdict: "Safe to Buy (Low Overlap)",
-    overlappingHoldings: [
-      { holdingName: "Tata Motors (Indirect)", viaFund: "Mirae Asset Large Cap", existingExposurePercent: 2.3 },
-      { holdingName: "Tata Group Overall", viaFund: "HDFC Flexi Cap", existingExposurePercent: 4.5 }
-    ],
-    rationale: "Direct stock purchase adds distinct automotive exposure. Total Tata Group rollup remains safe at ~9.6% of overall capital.",
-    projectedWeightIncrease: "+3.0% added to Auto sector"
+    underlyingCheckStocks: ["Tata Motors", "Tata"],
   },
   {
     id: "item_hdfc_top100",
@@ -82,15 +70,7 @@ const EXTENDED_OVERLAP_DATABASE: OverlapSearchItem[] = [
     type: "Mutual Fund",
     category: "Large Cap",
     currentPriceOrNAV: "NAV: ₹1,120.30",
-    overlapPercent: 64.2,
-    verdict: "High Risk (Severe Duplication)",
-    overlappingHoldings: [
-      { holdingName: "HDFC Bank Ltd.", viaFund: "Direct + 3 other MFs", existingExposurePercent: 15.87 },
-      { holdingName: "Reliance Industries", viaFund: "Direct + 2 other MFs", existingExposurePercent: 14.64 },
-      { holdingName: "ICICI Bank", viaFund: "Direct Stock", existingExposurePercent: 7.8 }
-    ],
-    rationale: "CRITICAL OVERLAP: 64.2% of this fund's top 10 holdings are already in your portfolio. You are essentially paying an extra 0.85% expense ratio to rebuy stocks you already own directly!",
-    projectedWeightIncrease: "Extreme double-dipping alert"
+    underlyingCheckStocks: ["HDFC Bank", "Reliance", "ICICI Bank", "Infosys", "TCS", "Larsen & Toubro"],
   },
   {
     id: "item_swiggy",
@@ -98,14 +78,7 @@ const EXTENDED_OVERLAP_DATABASE: OverlapSearchItem[] = [
     type: "IPO",
     category: "Consumer Tech",
     currentPriceOrNAV: "Band: ₹371 - ₹390",
-    overlapPercent: 14.5,
-    verdict: "Moderate Overlap (Proceed with Caution)",
-    overlappingHoldings: [
-      { holdingName: "Prosus NV / Naspers", viaFund: "Global Tech ETF", existingExposurePercent: 4.8 },
-      { holdingName: "Zomato Ltd.", viaFund: "Direct Stock", existingExposurePercent: 3.2 }
-    ],
-    rationale: "You hold direct Zomato equity (3.2%) and indirect Prosus exposure. Adding Swiggy increases your quick-commerce sector bet to ~8.0% of total equity allocation.",
-    projectedWeightIncrease: "+3.5% in Quick-Commerce"
+    underlyingCheckStocks: ["Swiggy", "Zomato"],
   },
   {
     id: "item_motilal_mid",
@@ -113,30 +86,89 @@ const EXTENDED_OVERLAP_DATABASE: OverlapSearchItem[] = [
     type: "Mutual Fund",
     category: "Mid Cap Equity",
     currentPriceOrNAV: "NAV: ₹98.20",
-    overlapPercent: 12.0,
-    verdict: "Safe to Buy (Low Overlap)",
-    overlappingHoldings: [
-      { holdingName: "Persistent Systems", viaFund: "Direct Stock", existingExposurePercent: 3.8 },
-      { holdingName: "Kalyan Jewellers", viaFund: "Motilal Underlying", existingExposurePercent: 2.4 }
-    ],
-    rationale: "High mid-cap uniqueness (88% distinct holdings). Recommended for retail investors looking to expand beyond large-cap banking concentration.",
-    projectedWeightIncrease: "Optimal mid-cap diversification"
-  }
+    underlyingCheckStocks: ["Persistent Systems", "Kalyan Jewellers", "Coforge"],
+  },
 ];
 
 export function PreBuyOverlapGuard() {
+  const { holdings, openSyncModal } = usePortfolioStore();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string>("item_hdfc_top100");
   const [filterType, setFilterType] = useState<"All" | "Mutual Fund" | "Stock" | "IPO">("All");
 
-  const filteredList = EXTENDED_OVERLAP_DATABASE.filter(item => {
-    const matchSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                        item.category.toLowerCase().includes(searchQuery.toLowerCase());
+  if (!holdings || holdings.length === 0) {
+    return (
+      <EmptyState
+        icon={ShieldCheck}
+        title="No portfolio connected"
+        description="Upload your CAS statement or connect your account to simulate candidate instruments and check pre-buy overlap against your real holdings."
+        actionLabel="Connect Portfolio"
+        onAction={() => openSyncModal("CAS")}
+      />
+    );
+  }
+
+  const totalPortfolioValue = holdings.reduce((sum, h) => sum + (Number(h.currentValue) || 0), 0);
+
+  const overlapItems: OverlapSearchItem[] = CANDIDATE_TEMPLATES.map((tmpl) => {
+    const matched = holdings.filter((h) =>
+      tmpl.underlyingCheckStocks.some(
+        (stk) =>
+          h.name.toLowerCase().includes(stk.toLowerCase()) ||
+          (h.ticker && h.ticker.toLowerCase().includes(stk.toLowerCase()))
+      )
+    );
+
+    const matchedVal = matched.reduce((sum, h) => sum + (Number(h.currentValue) || 0), 0);
+    const overlapPercent = totalPortfolioValue > 0 ? Number(((matchedVal / totalPortfolioValue) * 100).toFixed(1)) : 0;
+
+    const verdict: OverlapSearchItem["verdict"] =
+      overlapPercent > 30
+        ? "High Risk (Severe Duplication)"
+        : overlapPercent > 12
+        ? "Moderate Overlap (Proceed with Caution)"
+        : "Safe to Buy (Low Overlap)";
+
+    const overlappingHoldings = matched.map((h) => {
+      const hVal = Number(h.currentValue) || 0;
+      const hPct = totalPortfolioValue > 0 ? Number(((hVal / totalPortfolioValue) * 100).toFixed(1)) : 0;
+      return {
+        holdingName: h.name,
+        viaFund: h.type === "Mutual Fund" ? "Existing Mutual Fund" : "Direct Equity",
+        existingExposurePercent: hPct,
+      };
+    });
+
+    const rationale =
+      overlapPercent > 30
+        ? `High concentration alert: ${overlapPercent}% of your portfolio overlaps with this instrument's underlying holdings. Adding it will double-down on existing exposure.`
+        : overlapPercent > 12
+        ? `Moderate overlap: ${overlapPercent}% existing exposure. Proceed with awareness of single-company weight limits.`
+        : `Safe diversification profile: ${overlapPercent}% duplicate holdings detected. High portfolio uniqueness.`;
+
+    return {
+      id: tmpl.id,
+      name: tmpl.name,
+      type: tmpl.type,
+      category: tmpl.category,
+      currentPriceOrNAV: tmpl.currentPriceOrNAV,
+      overlapPercent,
+      verdict,
+      overlappingHoldings,
+      rationale,
+      projectedWeightIncrease: overlapPercent > 0 ? `+${(overlapPercent * 0.15).toFixed(1)}% weight impact` : "Optimal diversification",
+    };
+  });
+
+  const filteredList = overlapItems.filter((item) => {
+    const matchSearch =
+      item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.category.toLowerCase().includes(searchQuery.toLowerCase());
     const matchFilter = filterType === "All" || item.type === filterType;
     return matchSearch && matchFilter;
   });
 
-  const selectedItem = EXTENDED_OVERLAP_DATABASE.find(i => i.id === selectedId) || EXTENDED_OVERLAP_DATABASE[0];
+  const selectedItem = overlapItems.find((i) => i.id === selectedId) || overlapItems[0];
 
   const getVerdictStyle = (verdict: string) => {
     if (verdict.includes("High Risk")) return "bg-[var(--negative-soft)] text-[var(--negative)] border-[var(--negative)]/30";
@@ -295,7 +327,7 @@ export function PreBuyOverlapGuard() {
             {/* AI Advisor Rationale */}
             <div className="p-4 rounded-xl bg-[var(--card)] border border-border text-xs text-muted-foreground space-y-1.5">
               <span className="text-foreground font-bold flex items-center gap-1.5 font-sans">
-                <Sparkles className="w-3.5 h-3.5 text-[var(--warning)]" />
+                <ShieldCheck className="w-3.5 h-3.5 text-primary" />
                 <span>Nivesh Lens Diagnostic Recommendation:</span>
               </span>
               <p className="leading-relaxed text-[11.5px] font-sans text-muted-foreground">
@@ -306,7 +338,7 @@ export function PreBuyOverlapGuard() {
 
           {/* Action Button */}
           <div className="pt-3 border-t border-border/70 flex items-center justify-between text-xs">
-            <span className="text-muted-foreground font-mono text-[11px]">Calculated against your 14 live assets</span>
+            <span className="text-muted-foreground font-mono text-[11px]">Calculated against your {holdings.length} live assets</span>
             <button 
               onClick={() => alert(`Pre-buy audit simulated for ${selectedItem.name}. Diagnostic passed.`)}
               className="px-4 py-2 rounded-xl bg-primary text-primary-foreground font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-sm hover:opacity-90 active:scale-95 transition-all"

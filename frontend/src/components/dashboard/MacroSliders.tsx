@@ -11,14 +11,29 @@ import {
   Laptop
 } from "lucide-react";
 import { usePortfolioStore } from "@/store/portfolioStore";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 export function MacroSliders() {
   const { 
     macroConfig, 
     updateMacroConfig, 
     resetMacroConfig, 
-    getMacroStressedValue 
+    getMacroStressedValue,
+    holdings,
+    openSyncModal
   } = usePortfolioStore();
+
+  if (!holdings || holdings.length === 0) {
+    return (
+      <EmptyState
+        icon={SlidersHorizontal}
+        title="No portfolio data to stress test"
+        description="Upload a CAS statement or connect your account to simulate dynamic macro risk scenarios and sector shock impacts on your actual holdings."
+        actionLabel="Connect Portfolio"
+        onAction={() => openSyncModal("CAS")}
+      />
+    );
+  }
 
   const { stressedValue, dropPercent, dropRupees } = getMacroStressedValue();
 

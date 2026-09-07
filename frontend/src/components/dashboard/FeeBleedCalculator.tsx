@@ -4,17 +4,20 @@ import React, { useState, useEffect } from "react";
 import { 
   Coins, 
   TrendingDown, 
-  Sparkles
+  Sparkles,
+  ShieldCheck
 } from "lucide-react";
 import { usePortfolioStore } from "@/store/portfolioStore";
 import { Button } from "@/components/ui/Button";
+import { EmptyState } from "@/components/ui/EmptyState";
 import Link from "next/link";
 import { DiagnosticsResponse } from "@/types";
 
 export function FeeBleedCalculator() {
   const { 
     getWastedFeeAnnually, 
-    holdings
+    holdings,
+    openSyncModal
   } = usePortfolioStore();
 
   const [diagnostics, setDiagnostics] = useState<DiagnosticsResponse | null>(null);
@@ -39,6 +42,18 @@ export function FeeBleedCalculator() {
     window.addEventListener("nivesh_portfolio_updated", handleUpdate);
     return () => window.removeEventListener("nivesh_portfolio_updated", handleUpdate);
   }, []);
+
+  if (holdings.length === 0) {
+    return (
+      <EmptyState
+        icon={Coins}
+        title="Fee Bleed Diagnostic Unavailable"
+        description="Upload your CAS statement or connect your portfolio to calculate Regular plan distributor drag and duplicate TER bleed."
+        actionLabel="Connect Portfolio"
+        onAction={openSyncModal}
+      />
+    );
+  }
 
   const annualBleed = diagnostics?.fee_analysis?.total_annual_cost ?? getWastedFeeAnnually();
   const regularBleed = diagnostics?.fee_analysis?.regular_plan_annual_bleed ?? Math.round(annualBleed * 0.65);

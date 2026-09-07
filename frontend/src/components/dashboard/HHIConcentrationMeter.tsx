@@ -8,10 +8,24 @@ import {
 } from "lucide-react";
 import { usePortfolioStore } from "@/store/portfolioStore";
 import { InsightFlag } from "@/components/ui/InsightFlag";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 export function HHIConcentrationMeter() {
-  const { getHHIConcentrationScore, companyExposures } = usePortfolioStore();
+  const { getHHIConcentrationScore, companyExposures, holdings, openSyncModal } = usePortfolioStore();
   const router = useRouter();
+
+  if (holdings.length === 0 && companyExposures.length === 0) {
+    return (
+      <EmptyState
+        icon={Calculator}
+        title="HHI Concentration Meter Unavailable"
+        description="Upload a CAS statement or sync your portfolio to measure single-stock concentration risk using the Herfindahl-Hirschman Index."
+        actionLabel="Connect Portfolio"
+        onAction={openSyncModal}
+      />
+    );
+  }
+
   const hhi = getHHIConcentrationScore();
 
   // Status computation

@@ -13,12 +13,15 @@ import {
 import Link from "next/link";
 import { usePortfolioStore } from "@/store/portfolioStore";
 import { DiagnosticsResponse } from "@/types";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 export function HealthScoreGauge() {
   const { 
     getDiversificationScore, 
     getWhatIfDiversificationScore, 
-    isWhatIfActive 
+    isWhatIfActive,
+    holdings,
+    openSyncModal
   } = usePortfolioStore();
 
   const [diagnostics, setDiagnostics] = useState<DiagnosticsResponse | null>(null);
@@ -43,6 +46,18 @@ export function HealthScoreGauge() {
     window.addEventListener("nivesh_portfolio_updated", handleUpdate);
     return () => window.removeEventListener("nivesh_portfolio_updated", handleUpdate);
   }, []);
+
+  if (holdings.length === 0) {
+    return (
+      <EmptyState
+        icon={Activity}
+        title="Health Rating Unavailable"
+        description="Connect your investment portfolio or upload a CAS statement to generate your 300-900 FinTech health score."
+        actionLabel="Connect Portfolio"
+        onAction={openSyncModal}
+      />
+    );
+  }
 
   const score = isWhatIfActive 
     ? getWhatIfDiversificationScore() 

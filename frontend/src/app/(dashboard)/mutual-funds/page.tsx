@@ -1,10 +1,10 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { usePortfolioStore } from "@/store/portfolioStore";
 import { FeeBleedCalculator } from "@/components/dashboard/FeeBleedCalculator";
-import { SIPHealthAuditor } from "@/components/dashboard/SIPHealthAuditor";
+import { SmartSIPHealth } from "@/components/phase2/SmartSIPHealth";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { TableRowSkeleton } from "@/components/ui/Skeleton";
 import { 
@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils";
 import Link from "next/link";
 
 export default function MutualFundsPage() {
-  const { holdings } = usePortfolioStore();
+  const { holdings, openSyncModal } = usePortfolioStore();
   const [isLoading, setIsLoading] = useState(true);
   useEffect(() => {
     const t = setTimeout(() => setIsLoading(false), 350);
@@ -32,19 +32,63 @@ export default function MutualFundsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterPlan, setFilterPlan] = useState<"All" | "Direct" | "Regular">("All");
 
-  const mfHoldings = holdings
-    .filter(h => h.type === "Mutual Fund")
-    .filter(h => {
-      const matchSearch = h.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          h.sector.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchPlan = filterPlan === "All" || h.planType === filterPlan;
-      return matchSearch && matchPlan;
-    });
+  const allMfHoldings = useMemo(() => {
+    return holdings.filter(h => h.type === "Mutual Fund" || (!h.type && (h.assetClass?.includes("Mutual") || h.name.toLowerCase().includes("fund"))));
+  }, [holdings]);
 
-  const regularCount = holdings.filter(h => h.type === "Mutual Fund" && h.planType === "Regular").length;
-  const directCount = holdings.filter(h => h.type === "Mutual Fund" && h.planType === "Direct").length;
+  const mfHoldings = useMemo(() => {
+    return allMfHoldings
+      .filter(h => {
+        const matchSearch = h.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                            (h.sector && h.sector.toLowerCase().includes(searchQuery.toLowerCase()));
+        const matchPlan = filterPlan === "All" || h.planType === filterPlan;
+        return matchSearch && matchPlan;
+      });
+  }, [allMfHoldings, searchQuery, filterPlan]);
+
+  const regularHoldings = useMemo(() => allMfHoldings.filter(h => h.planType === "Regular"), [allMfHoldings]);
+  const regularCount = regularHoldings.length;
+  const directCount = allMfHoldings.filter(h => h.planType === "Direct" || !h.planType).length;
+
+  const totalMfValue = useMemo(() => {
+    return allMfHoldings.reduce((sum, h) => sum + (Number(h.currentValue) || 0), 0);
+  }, [allMfHoldings]);
+
+  const totalRegularBleed = useMemo(() => {
+    return regularHoldings.reduce((sum, h) => {
+      const exp = Number(h.expenseRatio) || 1.25;
+      return sum + (Number(h.currentValue) || 0) * (exp / 100);
+    }, 0);
+  }, [regularHoldings]);
+
+  const totalSipMonthly = useMemo(() => {
+    return allMfHoldings.reduce((sum, h) => sum + (Number(h.sipAmount) || 0), 0);
+  }, [allMfHoldings]);
+
+  const sipMandatesCount = useMemo(() => {
+    return allMfHoldings.filter(h => (Number(h.sipAmount) || 0) > 0).length;
+  }, [allMfHoldings]);
 
   const [selectedScheme, setSelectedScheme] = useState<typeof holdings[0] | null>(null);
+
+  if (!isLoading && holdings.length === 0) {
+    return (
+      <div className="space-y-8 pb-16 text-foreground">
+        <PageHeader
+          eyebrow="AMFI FOLIO INTELLIGENCE"
+          title="Mutual Funds & Scheme Health Terminal"
+          description="Consolidated breakdown of Total Expense Ratios (TER), Direct vs Regular distributor commission drag & SIP performance"
+        />
+        <EmptyState
+          icon={Landmark}
+          title="No Mutual Fund Schemes Found"
+          description="Upload your CAS statement or connect your broker to inspect mutual fund expense ratios, distributor bleed, and SIP health."
+          actionLabel="Connect Portfolio"
+          onAction={openSyncModal}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 pb-16 text-foreground">
@@ -70,10 +114,10 @@ export default function MutualFundsPage() {
         <div className="p-4 rounded-2xl bg-card border border-border shadow-sm space-y-1">
           <span className="text-xs text-muted-foreground">Total Mutual Fund Value</span>
           <p className="text-xl sm:text-2xl font-bold font-finance text-foreground mt-1 tabular-nums">
-            ₹23,45,000
+            ₹{totalMfValue.toLocaleString("en-IN")}
           </p>
-          <span className="text-[11px] text-[var(--positive)] font-finance flex items-center gap-1">
-            <TrendingUp className="w-3 h-3" /> +16.8% CAGR (3Y)
+          <span className="text-[11px] text-muted-foreground font-finance">
+            {allMfHoldings.length} Active Scheme{allMfHoldings.length === 1 ? "" : "s"}
           </span>
         </div>
 
@@ -87,7 +131,7 @@ export default function MutualFundsPage() {
             <Landmark className="w-3.5 h-3.5 text-muted-foreground group-hover:text-primary" />
           </div>
           <p className="text-xl sm:text-2xl font-bold font-finance text-foreground mt-1 tabular-nums">
-            {mfHoldings.length} / 8 Schemes
+            {mfHoldings.length} / {allMfHoldings.length} Schemes
           </p>
           <div className="flex items-center gap-1.5 pt-1">
             <button 
@@ -125,10 +169,10 @@ export default function MutualFundsPage() {
             <ShieldAlert className="w-3.5 h-3.5 text-[var(--negative)]" />
           </div>
           <p className="text-xl sm:text-2xl font-bold font-finance text-[var(--negative)] mt-1 tabular-nums">
-            ₹16,600 / yr
+            ₹{Math.round(totalRegularBleed).toLocaleString("en-IN")} / yr
           </p>
           <div className="flex items-center justify-between text-[11px] pt-1">
-            <span className="text-muted-foreground">{regularCount} Regular Schemes Active</span>
+            <span className="text-muted-foreground">{regularCount} Regular Scheme{regularCount === 1 ? "" : "s"} Active</span>
             <span className="text-primary font-semibold text-[10px] group-hover:underline">Show Bleed Schemes →</span>
           </div>
         </div>
@@ -136,7 +180,7 @@ export default function MutualFundsPage() {
         {/* Active Monthly SIPs */}
         <div 
           onClick={() => {
-            const el = document.getElementById("sip-health-auditor");
+            const el = document.getElementById("smart-sip-health-section");
             if (el) el.scrollIntoView({ behavior: "smooth" });
           }}
           className="p-4 rounded-2xl bg-card border border-border shadow-sm space-y-1 hover:border-primary/40 transition-colors cursor-pointer group"
@@ -146,10 +190,10 @@ export default function MutualFundsPage() {
             <Coins className="w-3.5 h-3.5 text-primary" />
           </div>
           <p className="text-xl sm:text-2xl font-bold font-finance text-primary mt-1 tabular-nums">
-            ₹45,000 / mo
+            {totalSipMonthly > 0 ? `₹${totalSipMonthly.toLocaleString("en-IN")} / mo` : `${sipMandatesCount > 0 ? sipMandatesCount : allMfHoldings.length} Positions`}
           </p>
           <div className="flex items-center justify-between text-[11px] pt-1 text-muted-foreground">
-            <span>5 Mandates</span>
+            <span>{sipMandatesCount > 0 ? `${sipMandatesCount} Mandates` : "Audited in SIP Check"}</span>
             <span className="text-primary font-semibold text-[10px] group-hover:underline">Audit SIPs →</span>
           </div>
         </div>
@@ -169,7 +213,7 @@ export default function MutualFundsPage() {
                   : "bg-[var(--card)] border-border text-muted-foreground hover:text-foreground"
               )}
             >
-              {p === "All" ? "All Schemes (8)" : p === "Direct" ? `Direct Plans (${directCount})` : `Regular Plans (${regularCount} Bleed)`}
+              {p === "All" ? `All Schemes (${allMfHoldings.length})` : p === "Direct" ? `Direct Plans (${directCount})` : `Regular Plans (${regularCount} Bleed)`}
             </button>
           ))}
         </div>
@@ -475,7 +519,9 @@ export default function MutualFundsPage() {
       <FeeBleedCalculator />
 
       {/* SIP Health & Switch */}
-      <SIPHealthAuditor />
+      <div id="smart-sip-health-section">
+        <SmartSIPHealth />
+      </div>
     </div>
   );
 }

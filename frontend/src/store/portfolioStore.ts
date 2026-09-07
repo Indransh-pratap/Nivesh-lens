@@ -18,17 +18,6 @@ import {
 } from "@/types";
 
 import {
-  MOCK_COMPANY_EXPOSURES,
-  MOCK_ALERTS,
-  MOCK_NOMINEES,
-  MOCK_TAX_ITEMS,
-  MOCK_SIP_AUDIT,
-  MOCK_CONGLOMERATES,
-  MOCK_FAMILY_MEMBERS,
-  MOCK_IPO_GUARD,
-  MOCK_DIVIDENDS,
-  MOCK_NEWS_IMPACTS,
-  MOCK_ADVISOR_CLIENTS,
   DEFAULT_ADVISOR_SETTINGS,
 } from "@/data/mock/portfolioData";
 
@@ -218,14 +207,9 @@ export const usePortfolioStore =
        * These areas are still static/demo until their respective
        * backend APIs are wired. They do not control portfolio value.
        */
-      companyExposures:
-        MOCK_COMPANY_EXPOSURES,
-
-      conglomerates:
-        MOCK_CONGLOMERATES,
-
-      alerts:
-        MOCK_ALERTS,
+      companyExposures: [],
+      conglomerates: [],
+      alerts: [],
 
       notificationPrefs: {
         Concentration: {
@@ -259,35 +243,25 @@ export const usePortfolioStore =
         },
       },
 
-      nominees:
-        MOCK_NOMINEES,
+      nominees: [],
 
-      taxGains:
-        MOCK_TAX_ITEMS,
+      taxGains: [],
 
-      sipAudits:
-        MOCK_SIP_AUDIT,
+      sipAudits: [],
 
-      familyMembers:
-        MOCK_FAMILY_MEMBERS,
+      familyMembers: [],
 
-      activeFamilyMemberId:
-        "fam_1",
+      activeFamilyMemberId: "",
 
-      ipoGuardList:
-        MOCK_IPO_GUARD,
+      ipoGuardList: [],
 
-      dividends:
-        MOCK_DIVIDENDS,
+      dividends: [],
 
-      newsImpacts:
-        MOCK_NEWS_IMPACTS,
+      newsImpacts: [],
 
-      advisorClients:
-        MOCK_ADVISOR_CLIENTS,
+      advisorClients: [],
 
-      selectedClientId:
-        "client_1",
+      selectedClientId: "",
 
       advisorSettings:
         DEFAULT_ADVISOR_SETTINGS,
@@ -355,6 +329,19 @@ export const usePortfolioStore =
           whatIfHoldings: [],
           isWhatIfActive: false,
           swappedFundsCount: 0,
+          companyExposures: [],
+          conglomerates: [],
+          alerts: [],
+          nominees: [],
+          taxGains: [],
+          sipAudits: [],
+          familyMembers: [],
+          activeFamilyMemberId: "",
+          ipoGuardList: [],
+          dividends: [],
+          newsImpacts: [],
+          advisorClients: [],
+          selectedClientId: "",
         }),
 
       openSyncModal: (

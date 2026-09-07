@@ -1,13 +1,25 @@
 "use client";
 
-import React from "react";
 import { 
   Wallet
 } from "lucide-react";
 import { usePortfolioStore } from "@/store/portfolioStore";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 export function DividendCalendar() {
-  const { dividends } = usePortfolioStore();
+  const { dividends, openSyncModal } = usePortfolioStore();
+
+  if (!dividends || dividends.length === 0) {
+    return (
+      <EmptyState
+        icon={Wallet}
+        title="No dividend records available"
+        description="Upload your CAS statement or connect your account to track upcoming corporate dividend announcements, ex-dates, and projected passive income."
+        actionLabel="Connect Portfolio"
+        onAction={() => openSyncModal("CAS")}
+      />
+    );
+  }
 
   const totalAnnualDividends = dividends.reduce((acc, d) => acc + d.totalDividend, 0);
 

@@ -1,14 +1,26 @@
 "use client";
 
-import React from "react";
 import { 
   Radio, 
   Info
 } from "lucide-react";
 import { usePortfolioStore } from "@/store/portfolioStore";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 export function NewsImpactFeed() {
-  const { newsImpacts } = usePortfolioStore();
+  const { newsImpacts, openSyncModal } = usePortfolioStore();
+
+  if (!newsImpacts || newsImpacts.length === 0) {
+    return (
+      <EmptyState
+        icon={Radio}
+        title="No news impact alerts"
+        description="Holding-specific financial intelligence and quantified net worth impacts will appear here when market events affect your portfolio."
+        actionLabel="Connect Portfolio"
+        onAction={() => openSyncModal("CAS")}
+      />
+    );
+  }
 
   return (
     <div className="rounded-2xl border border-border bg-[var(--card)] p-6 shadow-xl shadow-black/30 text-foreground relative overflow-hidden">

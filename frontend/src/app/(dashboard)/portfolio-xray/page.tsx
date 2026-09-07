@@ -10,7 +10,7 @@ export default function PortfolioXRayPage() {
   return (
     <div className="space-y-8 pb-12">
       <PageHeader
-        eyebrow="PHASE 1 CORE ENGINE"
+        eyebrow="PORTFOLIO X-RAY"
         title="Portfolio X-Ray & True Look-Through"
         description="Scans every mutual fund scheme disclosure to aggregate true company and corporate group exposure"
       />

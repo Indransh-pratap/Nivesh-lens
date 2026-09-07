@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils";
 import Link from "next/link";
 
 export default function HoldingsPage() {
-  const { holdings, setHoldings } = usePortfolioStore();
+  const { holdings, setHoldings, openSyncModal } = usePortfolioStore();
 
   const [isLoading, setIsLoading] = useState(true);
 
@@ -261,6 +261,25 @@ export default function HoldingsPage() {
   const [selectedHolding, setSelectedHolding] = useState<
     (typeof holdings)[0] | null
   >(null);
+
+  if (!isLoading && holdings.length === 0) {
+    return (
+      <div className="space-y-8 pb-16 text-foreground">
+        <PageHeader
+          eyebrow="TERMINAL VIEW"
+          title="Holdings & Instruments Terminal"
+          description="Consolidated inventory of connected direct equities, mutual funds & fixed income assets with 52W range gauges"
+        />
+        <EmptyState
+          icon={Layers}
+          title="No Holdings Found"
+          description="Upload your CAS statement or connect your broker to view and analyze your investment portfolio."
+          actionLabel="Connect Portfolio"
+          onAction={openSyncModal}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 pb-16 text-foreground">

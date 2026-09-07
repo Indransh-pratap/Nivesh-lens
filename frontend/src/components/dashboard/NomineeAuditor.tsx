@@ -10,12 +10,13 @@ import {
 import { usePortfolioStore } from "@/store/portfolioStore";
 import { Button } from "@/components/ui/Button";
 import { InsightFlag } from "@/components/ui/InsightFlag";
+import { EmptyState } from "@/components/ui/EmptyState";
 import { DiagnosticsResponse } from "@/types";
 
 type RelationshipType = "Spouse" | "Child" | "Parent" | "Sibling";
 
 export function NomineeAuditor() {
-  const { nominees, updateNominee } = usePortfolioStore();
+  const { nominees, updateNominee, openSyncModal } = usePortfolioStore();
   const [diagnostics, setDiagnostics] = useState<DiagnosticsResponse | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tempNomineeName, setTempNomineeName] = useState("");
@@ -49,12 +50,12 @@ export function NomineeAuditor() {
 
   const handleFix = (id: string) => {
     updateNominee(id, {
-      nomineeName: tempNomineeName || "Pooja Thakur",
+      nomineeName: tempNomineeName || "Registered Nominee",
       relationship: tempRelation,
       allocation: 100,
       status: "Verified",
       verificationMethod: "DigiLocker e-Sign",
-      lastUpdated: "Just Now (2026)"
+      lastUpdated: "Updated"
     });
     setEditingId(null);
   };
@@ -72,6 +73,18 @@ export function NomineeAuditor() {
         lastUpdated: "CAS Audit",
       }))
     : nominees;
+
+  if (displayAccounts.length === 0) {
+    return (
+      <EmptyState
+        icon={ShieldCheck}
+        title="No accounts found for nominee audit"
+        description="Upload your CAS statement or connect your account to scan Demat folios, mutual funds, and bank accounts for SEBI nominee compliance."
+        actionLabel="Connect Portfolio"
+        onAction={() => openSyncModal("CAS")}
+      />
+    );
+  }
 
   return (
     <div className="rounded-2xl border border-border bg-[var(--card)] p-6 shadow-xl shadow-black/30 text-foreground relative overflow-hidden">
@@ -194,7 +207,7 @@ export function NomineeAuditor() {
                       <Button 
                         size="sm" 
                         variant="outline" 
-                        onClick={() => { setEditingId(item.id); setTempNomineeName("Pooja Thakur"); }}
+                        onClick={() => { setEditingId(item.id); setTempNomineeName(""); }}
                         className="text-xs h-7 border-[var(--negative)]/30 text-[var(--negative)] hover:bg-[var(--negative)]/10"
                       >
                         Add Nominee

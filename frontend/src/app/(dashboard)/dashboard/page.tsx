@@ -147,7 +147,7 @@ const CrashSimulator =
   dynamic(
     () =>
       import(
-        "@/components/dashboard/CrashSimulator"
+        "@/components/phase2/CrashSimulator"
       ).then(
         (m) => m.CrashSimulator
       ),

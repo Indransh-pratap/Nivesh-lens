@@ -12,13 +12,26 @@ import {
 } from "lucide-react";
 import { usePortfolioStore } from "@/store/portfolioStore";
 import { IconButton } from "@/components/ui/IconButton";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 export function LookThroughTable() {
-  const { companyExposures } = usePortfolioStore();
+  const { companyExposures, holdings, openSyncModal } = usePortfolioStore();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedSector, setSelectedSector] = useState("All");
-  const [expandedId, setExpandedId] = useState<string | null>("exp_1"); // Default expand HDFC Bank
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<"exposure" | "direct" | "indirect">("exposure");
+
+  if (holdings.length === 0 && companyExposures.length === 0) {
+    return (
+      <EmptyState
+        icon={Layers}
+        title="No Look-Through Data Available"
+        description="Upload your CAS statement or connect your portfolio to see true company exposure combining direct equities and mutual fund holdings."
+        actionLabel="Connect Portfolio"
+        onAction={openSyncModal}
+      />
+    );
+  }
 
   const sectors = ["All", "Financial Services", "Energy & Petrochemicals", "Information Technology", "Technology & Software"];
 

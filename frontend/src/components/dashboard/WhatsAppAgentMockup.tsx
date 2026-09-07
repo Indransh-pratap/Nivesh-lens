@@ -9,10 +9,29 @@ import {
   CheckCheck, 
   Volume2
 } from "lucide-react";
+import { usePortfolioStore } from "@/store/portfolioStore";
+import { EmptyState } from "@/components/ui/EmptyState";
 
 export function WhatsAppAgentMockup() {
+  const { holdings, companyExposures, getDiversificationScore, getWastedFeeAnnually, openSyncModal } = usePortfolioStore();
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeLanguage, setActiveLanguage] = useState<"Hinglish" | "English">("Hinglish");
+
+  if (holdings.length === 0) {
+    return (
+      <EmptyState
+        icon={MessageSquare}
+        title="WhatsApp Assistant Preview Unavailable"
+        description="Upload your CAS statement or connect your broker to see how Nivesh Lens AI sends voice notes, infographics, and diagnostics directly to WhatsApp."
+        actionLabel="Connect Portfolio"
+        onAction={openSyncModal}
+      />
+    );
+  }
+
+  const score = getDiversificationScore();
+  const wastedFee = getWastedFeeAnnually();
+  const topExposure = companyExposures.length > 0 ? companyExposures[0] : null;
 
   return (
     <div className="rounded-2xl border border-border bg-[var(--card)] p-6 shadow-xl shadow-black/30 text-foreground relative overflow-hidden">
@@ -79,11 +98,11 @@ export function WhatsAppAgentMockup() {
               <div className="flex items-center gap-2.5 p-2 rounded-xl bg-emerald-900/30 border border-emerald-700/30">
                 <FileText className="w-5 h-5 text-[var(--positive)] shrink-0" strokeWidth={1.75} />
                 <div className="overflow-hidden">
-                  <p className="font-bold text-[11px] truncate">CAS_CAMS_KFin_August2026.pdf</p>
-                  <p className="text-[9px] text-emerald-300/80 font-mono">Password: ABCDE1234F · 482 KB</p>
+                  <p className="font-bold text-[11px] truncate">CAS_Consolidated_Statement.pdf</p>
+                  <p className="text-[9px] text-emerald-300/80 font-mono">Encrypted · Analyzed</p>
                 </div>
               </div>
-              <p className="text-[11px] text-slate-200">Hi Nivesh Lens, please check my mutual funds and tell me where I am losing money.</p>
+              <p className="text-[11px] text-slate-200">Hi Nivesh Lens, please check my portfolio and tell me where I am losing money.</p>
               <div className="flex justify-end items-center gap-1 text-[9px] text-[var(--positive)] font-mono">
                 <span>04:15 PM</span>
                 <CheckCheck className="w-3.5 h-3.5 text-cyan-400" />
@@ -128,11 +147,11 @@ export function WhatsAppAgentMockup() {
                 </div>
                 {activeLanguage === "Hinglish" ? (
                   <p>
-                    &ldquo;Namaste Anubhav ji! Humne aapka CAS statement analyze kar liya hai. Aapka <strong className="text-white font-mono tabular-nums">Health Score 742/900</strong> hai. Sabse bada red flag ye hai ki aapka <strong className="text-white font-mono tabular-nums">15.8% capital sirf HDFC Bank</strong> me laga hua hai. Sath hi, aap <strong className="text-white font-mono tabular-nums">₹24,800 har saal duplicate fees</strong> me gawa rahe hain.&rdquo;
+                    &ldquo;Namaste! Humne aapka portfolio analyze kar liya hai. Aapka <strong className="text-white font-mono tabular-nums">Health Score {score}/900</strong> hai.{topExposure ? <> Sabse bada exposure <strong className="text-white font-mono tabular-nums">{topExposure.totalTruePercent.toFixed(1)}% {topExposure.companyName}</strong> me hai.</> : ""} Sath hi, aap <strong className="text-white font-mono tabular-nums">₹{wastedFee.toLocaleString("en-IN")} har saal duplicate fees</strong> me bacha sakte hain.&rdquo;
                   </p>
                 ) : (
                   <p>
-                    &ldquo;Hello Anubhav! We analyzed your CAS statement. Your <strong className="text-white font-mono tabular-nums">Health Score is 742/900</strong>. Major red flag: <strong className="text-white font-mono tabular-nums">15.8% of your net worth is tied up in HDFC Bank</strong>. Also, you are losing <strong className="text-white font-mono tabular-nums">₹24,800/yr in duplicate Regular fees</strong>.&rdquo;
+                    &ldquo;Hello! We analyzed your portfolio. Your <strong className="text-white font-mono tabular-nums">Health Score is {score}/900</strong>.{topExposure ? <> Top exposure: <strong className="text-white font-mono tabular-nums">{topExposure.totalTruePercent.toFixed(1)}% in {topExposure.companyName}</strong>.</> : ""} Also, you can save <strong className="text-white font-mono tabular-nums">₹{wastedFee.toLocaleString("en-IN")}/yr in duplicate fees</strong>.&rdquo;
                   </p>
                 )}
               </div>
@@ -141,12 +160,12 @@ export function WhatsAppAgentMockup() {
               <div className="rounded-xl border border-border/70 bg-[var(--background-elevated)] p-3 space-y-1.5">
                 <div className="flex justify-between items-center text-xs pb-1.5 border-b border-border/70">
                   <span className="font-bold text-[var(--positive)]">Nivesh Lens Diagnostic</span>
-                  <span className="font-mono font-bold text-white tabular-nums">Score: 742/900</span>
+                  <span className="font-mono font-bold text-white tabular-nums">Score: {score}/900</span>
                 </div>
                 <div className="text-[10px] space-y-1 text-muted-foreground font-sans">
-                  <p>• <strong className="text-slate-200">Reliance + HDFC Concentration:</strong> 30.5% Total Cap</p>
-                  <p>• <strong className="text-slate-200">Annual Wasted Fees:</strong> ₹24,800 / year</p>
-                  <p>• <strong className="text-slate-200">Missing Nominees:</strong> 2 MF Folios & 1 Fixed Deposit</p>
+                  {topExposure && <p>• <strong className="text-slate-200">Top Exposure:</strong> {topExposure.companyName} ({topExposure.totalTruePercent.toFixed(1)}%)</p>}
+                  <p>• <strong className="text-slate-200">Annual Wasted Fees:</strong> ₹{wastedFee.toLocaleString("en-IN")} / year</p>
+                  <p>• <strong className="text-slate-200">Instruments Monitored:</strong> {holdings.length} holdings</p>
                 </div>
               </div>
 

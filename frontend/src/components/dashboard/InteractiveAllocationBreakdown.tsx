@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { 
   PieChart, 
   Pie, 
@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
+import { usePortfolioStore } from "@/store/portfolioStore";
 
 interface AssetClassItem {
   name: string;
@@ -37,25 +38,149 @@ interface SectorItem {
   riskRating: "Low" | "Moderate" | "High";
 }
 
-const ASSET_CLASSES: AssetClassItem[] = [
-  { name: "Indian Equities (Direct + MFs)", value: 2728320, percent: 78.4, color: "#3b82f6", description: "Large, Mid & Small cap direct stocks & active mutual fund portfolios" },
-  { name: "Fixed Income & Liquid Debt", value: 480240, percent: 13.8, color: "#64748b", description: "HDFC Corporate Bond Fund & High-yield Bank Fixed Deposits" },
-  { name: "Global Tech / US Equities", value: 271440, percent: 7.8, color: "#6366f1", description: "Nasdaq 100 ETF & International Tech FoF" },
-];
-
-const SECTORS: SectorItem[] = [
-  { name: "Financial Services", percent: 31.4, value: 1092720, color: "#3b82f6", topHoldings: ["HDFC Bank", "ICICI Bank", "Kotak Bank"], riskRating: "High" },
-  { name: "Technology & IT", percent: 18.2, value: 633360, color: "#6366f1", topHoldings: ["Infosys", "TCS", "Persistent Systems"], riskRating: "Low" },
-  { name: "Energy & Conglomerates", percent: 14.6, value: 508080, color: "#0ea5e9", topHoldings: ["Reliance Industries", "Tata Power"], riskRating: "Moderate" },
-  { name: "Automotive & EV", percent: 8.5, value: 295800, color: "#f59e0b", topHoldings: ["Tata Motors", "M&M"], riskRating: "Moderate" },
-  { name: "Consumer & FMCG", percent: 6.8, value: 236640, color: "#8b5cf6", topHoldings: ["ITC Ltd", "HUL"], riskRating: "Low" },
-  { name: "Healthcare & Pharma", percent: 5.5, value: 191400, color: "#10b981", topHoldings: ["Sun Pharma", "Cipla"], riskRating: "Low" },
-  { name: "Others & Cash", percent: 15.0, value: 522000, color: "#64748b", topHoldings: ["Fixed Deposits", "Liquid Cash"], riskRating: "Low" },
-];
+const SECTOR_COLORS: Record<string, string> = {
+  "Financial Services": "#3b82f6",
+  "Banking": "#3b82f6",
+  "Technology": "#6366f1",
+  "Information Technology": "#6366f1",
+  "Technology & IT": "#6366f1",
+  "Energy": "#0ea5e9",
+  "Energy & Conglomerates": "#0ea5e9",
+  "Oil & Gas": "#0ea5e9",
+  "Automotive & EV": "#f59e0b",
+  "Automobile": "#f59e0b",
+  "Consumer & FMCG": "#8b5cf6",
+  "FMCG": "#8b5cf6",
+  "Healthcare & Pharma": "#10b981",
+  "Healthcare": "#10b981",
+  "Metals & Mining": "#d97706",
+  "Infrastructure": "#f97316",
+  "Others & Cash": "#64748b",
+};
 
 export function InteractiveAllocationBreakdown() {
-  const [selectedSector, setSelectedSector] = useState<SectorItem>(SECTORS[0]);
+  const { holdings } = usePortfolioStore();
+
+  const totalValue = useMemo(() => {
+    return holdings.reduce((sum, h) => sum + (Number(h.currentValue) || 0), 0);
+  }, [holdings]);
+
+  const assetClasses: AssetClassItem[] = useMemo(() => {
+    if (holdings.length === 0 || totalValue === 0) return [];
+    
+    let equityVal = 0;
+    let debtVal = 0;
+    let globalVal = 0;
+    let otherVal = 0;
+
+    for (const h of holdings) {
+      const val = Number(h.currentValue) || 0;
+      const ac = String(h.assetClass || "").toLowerCase();
+      const type = String(h.type || "").toLowerCase();
+      const name = String(h.name || "").toLowerCase();
+
+      if (ac.includes("global") || ac.includes("international") || name.includes("nasdaq") || name.includes("us ")) {
+        globalVal += val;
+      } else if (ac.includes("debt") || ac.includes("fixed") || type === "fd" || name.includes("bond") || name.includes("liquid")) {
+        debtVal += val;
+      } else if (ac.includes("equity") || type === "stock" || type.includes("mutual")) {
+        equityVal += val;
+      } else {
+        otherVal += val;
+      }
+    }
+
+    const items: AssetClassItem[] = [];
+    if (equityVal > 0) {
+      items.push({
+        name: "Indian Equities (Direct + MFs)",
+        value: equityVal,
+        percent: Number(((equityVal / totalValue) * 100).toFixed(1)),
+        color: "#3b82f6",
+        description: "Direct stocks and domestic active mutual fund portfolios"
+      });
+    }
+    if (debtVal > 0) {
+      items.push({
+        name: "Fixed Income & Debt",
+        value: debtVal,
+        percent: Number(((debtVal / totalValue) * 100).toFixed(1)),
+        color: "#64748b",
+        description: "Debt mutual funds, corporate bonds and fixed deposits"
+      });
+    }
+    if (globalVal > 0) {
+      items.push({
+        name: "Global Equities",
+        value: globalVal,
+        percent: Number(((globalVal / totalValue) * 100).toFixed(1)),
+        color: "#6366f1",
+        description: "International index funds, ETFs and foreign equities"
+      });
+    }
+    if (otherVal > 0) {
+      items.push({
+        name: "Other Assets / Cash",
+        value: otherVal,
+        percent: Number(((otherVal / totalValue) * 100).toFixed(1)),
+        color: "#10b981",
+        description: "Cash balances and other financial instruments"
+      });
+    }
+
+    return items;
+  }, [holdings, totalValue]);
+
+  const sectors: SectorItem[] = useMemo(() => {
+    if (holdings.length === 0 || totalValue === 0) return [];
+
+    const map = new Map<string, { value: number; holdings: string[] }>();
+
+    for (const h of holdings) {
+      const sec = h.sector && h.sector !== "Diversified MF" && h.sector !== "Equity" 
+        ? h.sector 
+        : (h.type === "Mutual Fund" ? "Diversified Equity" : "General Industry");
+      const val = Number(h.currentValue) || 0;
+      
+      const existing = map.get(sec) || { value: 0, holdings: [] };
+      existing.value += val;
+      if (h.name && !existing.holdings.includes(h.name)) {
+        existing.holdings.push(h.name);
+      }
+      map.set(sec, existing);
+    }
+
+    const fallbackColors = ["#3b82f6", "#6366f1", "#0ea5e9", "#f59e0b", "#8b5cf6", "#10b981", "#64748b", "#ec4899"];
+    let colorIdx = 0;
+
+    const list: SectorItem[] = [];
+    map.forEach((data, secName) => {
+      const pct = Number(((data.value / totalValue) * 100).toFixed(1));
+      const riskRating: "Low" | "Moderate" | "High" = pct > 25 ? "High" : pct > 15 ? "Moderate" : "Low";
+      const color = SECTOR_COLORS[secName] || fallbackColors[colorIdx % fallbackColors.length];
+      colorIdx++;
+
+      list.push({
+        name: secName,
+        percent: pct,
+        value: data.value,
+        color,
+        topHoldings: data.holdings.slice(0, 4),
+        riskRating
+      });
+    });
+
+    return list.sort((a, b) => b.value - a.value);
+  }, [holdings, totalValue]);
+
+  const [selectedSector, setSelectedSector] = useState<SectorItem | null>(null);
   const [activeTab, setActiveTab] = useState<"asset" | "sector">("sector");
+
+  const currentSelectedSector = selectedSector || (sectors.length > 0 ? sectors[0] : null);
+
+  if (holdings.length === 0 || (sectors.length === 0 && assetClasses.length === 0)) {
+    return null;
+  }
 
   return (
     <div className="grid lg:grid-cols-[1.2fr_0.8fr] gap-6 text-foreground">
@@ -83,7 +208,7 @@ export function InteractiveAllocationBreakdown() {
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
-              Sectors (7)
+              Sectors ({sectors.length})
             </button>
             <button
               onClick={() => setActiveTab("asset")}
@@ -94,7 +219,7 @@ export function InteractiveAllocationBreakdown() {
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
-              Asset Classes (3)
+              Asset Classes ({assetClasses.length})
             </button>
           </div>
         </div>
@@ -103,7 +228,7 @@ export function InteractiveAllocationBreakdown() {
           <div className="space-y-4">
             {/* Sector Progress Bar Stack */}
             <div className="w-full h-3 rounded-full overflow-hidden flex bg-[var(--background-elevated)] border border-border">
-              {SECTORS.map((sec) => (
+              {sectors.map((sec) => (
                 <div
                   key={sec.name}
                   style={{ width: `${sec.percent}%`, backgroundColor: sec.color }}
@@ -116,8 +241,8 @@ export function InteractiveAllocationBreakdown() {
 
             {/* Clickable Sector Grid */}
             <div className="grid sm:grid-cols-2 gap-2.5 pt-1">
-              {SECTORS.map((sec) => {
-                const isSelected = selectedSector.name === sec.name;
+              {sectors.map((sec) => {
+                const isSelected = currentSelectedSector?.name === sec.name;
                 return (
                   <div
                     key={sec.name}
@@ -154,32 +279,34 @@ export function InteractiveAllocationBreakdown() {
             </div>
 
             {/* Sector Deep Dive Card */}
-            <div className="p-4 rounded-xl bg-[var(--background-elevated)] border border-border/80 space-y-2 text-xs">
-              <div className="flex items-center justify-between pb-2 border-b border-border/70">
-                <span className="font-bold text-foreground flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: selectedSector.color }} />
-                  {selectedSector.name} Deep Dive
-                </span>
-                <span className="font-mono font-bold text-primary tabular-nums text-xs">
-                  {selectedSector.percent}% of Net Worth (₹{(selectedSector.value / 100000).toFixed(2)}L)
-                </span>
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                Major stocks contributing to this sector in your portfolio:
-              </p>
-              <div className="flex flex-wrap gap-2 pt-1 font-mono text-[11px]">
-                {selectedSector.topHoldings.map((h) => (
-                  <span key={h} className="px-2.5 py-1 rounded-lg bg-[var(--card)] border border-border font-medium text-foreground">
-                    {h}
+            {currentSelectedSector && (
+              <div className="p-4 rounded-xl bg-[var(--background-elevated)] border border-border/80 space-y-2 text-xs">
+                <div className="flex items-center justify-between pb-2 border-b border-border/70">
+                  <span className="font-bold text-foreground flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: currentSelectedSector.color }} />
+                    {currentSelectedSector.name} Deep Dive
                   </span>
-                ))}
+                  <span className="font-mono font-bold text-primary tabular-nums text-xs">
+                    {currentSelectedSector.percent}% of Net Worth (₹{(currentSelectedSector.value / 100000).toFixed(2)}L)
+                  </span>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Major holdings contributing to this category in your portfolio:
+                </p>
+                <div className="flex flex-wrap gap-2 pt-1 font-mono text-[11px]">
+                  {currentSelectedSector.topHoldings.map((h) => (
+                    <span key={h} className="px-2.5 py-1 rounded-lg bg-[var(--card)] border border-border font-medium text-foreground">
+                      {h}
+                    </span>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         ) : (
           <div className="space-y-4">
             <div className="grid gap-3">
-              {ASSET_CLASSES.map((ac) => (
+              {assetClasses.map((ac) => (
                 <div key={ac.name} className="p-4 rounded-xl bg-[var(--background-elevated)] border border-border/80 space-y-2 text-xs">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
