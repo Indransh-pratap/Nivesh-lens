@@ -286,15 +286,27 @@ def _serialize_holding(
 
         "asset_type": asset_type,
 
-        "returns": 0.0,
+        "returns": _decimal_float(
+            ((current_value - invested_value) / invested_value * Decimal("100"))
+            if invested_value and invested_value > Decimal("0") and current_value is not None
+            else Decimal("0")
+        ),
 
-        "returnsValue": 0.0,
+        "returnsValue": _decimal_float(
+            (current_value - invested_value)
+            if current_value is not None and invested_value is not None
+            else Decimal("0")
+        ),
 
-        "returns_value": 0.0,
+        "returns_value": _decimal_float(
+            (current_value - invested_value)
+            if current_value is not None and invested_value is not None
+            else Decimal("0")
+        ),
 
         "planType": (
-            "Direct"
-            if asset_type == "MUTUAL_FUND"
+            "Regular"
+            if "REGULAR" in holding.name.upper()
             else "Direct"
         ),
 

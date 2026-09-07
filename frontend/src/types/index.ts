@@ -423,3 +423,83 @@ export interface AdvisorSettings {
   logoText: string;
   disclaimer: string;
 }
+
+export interface DiagnosticPillarDetail {
+  score: number;
+  max_score: number;
+  weight_percent: number;
+  status: string;
+  note: string;
+}
+
+export interface DiagnosticsResponse {
+  portfolio_id: string;
+  total_value: number;
+  diversification_score: {
+    score: number;
+    rating: string;
+    max_score: number;
+    min_score: number;
+    pillars: {
+      single_company_exposure: DiagnosticPillarDetail;
+      asset_spread: DiagnosticPillarDetail;
+      scheme_overlap_ter: DiagnosticPillarDetail;
+      nominee_compliance: DiagnosticPillarDetail;
+    };
+    explainability_notes: string[];
+  };
+  concentration: {
+    hhi_score: number;
+    inverse_hhi_effective_count: number;
+    category: string;
+    unmapped_weight_percent: number;
+  };
+  top_company_exposures: Array<{
+    company_name: string;
+    isin?: string;
+    combined_percent: number;
+    combined_value: number;
+    direct_value: number;
+    mutual_fund_value: number;
+  }>;
+  fee_analysis?: {
+    total_portfolio_value: number;
+    total_annual_cost: number;
+    actual_ter_annual_cost: number;
+    regular_plan_annual_bleed: number;
+    potential_duplicate_ter_cost: number;
+    compounded_loss_projections: Record<string, number>;
+  };
+  nominee_audit?: {
+    accounts_checked: number;
+    accounts_confirmed: number;
+    accounts_missing: number;
+    accounts_unknown: number;
+    compliance_percentage: number;
+    is_fully_compliant: boolean;
+    red_flags: Array<{
+      account_name: string;
+      account_number: string;
+      warning: string;
+      action_required: string;
+    }>;
+    accounts: Array<{
+      account_id: string;
+      account_name: string;
+      account_type: string;
+      masked_account_number: string;
+      nominee_status: "CONFIRMED" | "MISSING" | "UNKNOWN";
+      nominee_name?: string | null;
+      relationship?: string | null;
+      action_required?: string | null;
+    }>;
+  };
+  alerts: Array<{
+    id?: string;
+    type: string;
+    title: string;
+    message: string;
+    severity: string;
+  }>;
+}
+

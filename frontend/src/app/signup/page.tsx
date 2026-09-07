@@ -82,7 +82,10 @@ export default function SignupPage() {
       console.error("Signup request failed:", err);
 
       if (err instanceof Error) {
-        setError(err.message);
+        const message = err.message.toLowerCase().includes("fetch") || err.message.toLowerCase().includes("network")
+          ? "Cannot reach the authentication server. Please check your connection and try again."
+          : err.message;
+        setError(message);
       } else {
         setError("Something went wrong while creating your account.");
       }

@@ -6,16 +6,13 @@ from pydantic import BaseModel, Field
 class CasOtpRequest(BaseModel):
     """
     Request to initiate a CAS OTP session.
-
-    The actual fields required by NSDL will be added once
-    the official NSDL API specification is available.
     """
 
     identifier: str = Field(
         ...,
         min_length=1,
         max_length=255,
-        description="Customer identifier required by the CAS provider.",
+        description="Customer identifier required by the CAS / Account Aggregator provider.",
     )
 
 
@@ -49,9 +46,12 @@ class CasOtpVerifyRequest(BaseModel):
 
 class CasOtpVerifyResponse(BaseModel):
     """
-    Response returned after OTP verification.
+    Response returned after OTP verification with synced portfolio details.
     """
 
     request_id: str
     status: str
-    
+    portfolio_id: str | None = None
+    holdings_count: int = 0
+    total_value: float = 0.0
+    sync_id: str | None = None

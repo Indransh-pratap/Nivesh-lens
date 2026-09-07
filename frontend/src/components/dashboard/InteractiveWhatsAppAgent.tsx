@@ -130,14 +130,14 @@ export function InteractiveWhatsAppAgent() {
       <div className="flex items-center justify-between pb-4 border-b border-border">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-primary/10 text-primary border border-primary/20 flex items-center justify-center font-bold">
-            <Bot className="w-5 h-5" />
+            <MessageSquare className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h3 className="text-base font-bold text-foreground">Nivesh Lens AI Diagnostic Assistant</h3>
-              <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+              <h3 className="text-base font-bold text-foreground">Portfolio Diagnostic Assistant</h3>
+              <span className="w-2 h-2 rounded-full bg-primary" />
             </div>
-            <p className="text-xs text-muted-foreground font-mono">Real-time WhatsApp & Telegram wealth advisor</p>
+            <p className="text-xs text-muted-foreground font-mono">Automated portfolio queries, fee audits, and SEBI compliance checks</p>
           </div>
         </div>
 
@@ -154,7 +154,7 @@ export function InteractiveWhatsAppAgent() {
             onClick={() => handleSend(prompt)}
             className="px-3 py-1.5 rounded-xl bg-accent/40 hover:bg-accent border border-border hover:border-primary/50 text-xs text-muted-foreground hover:text-foreground transition-all cursor-pointer whitespace-nowrap active:scale-95 flex items-center gap-1.5"
           >
-            <Sparkles className="w-3 h-3 text-primary" />
+            <ArrowRight className="w-3 h-3 text-primary" />
             <span>{prompt}</span>
           </button>
         ))}

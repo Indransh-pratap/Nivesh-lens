@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { 
   Coins, 
   TrendingDown, 
@@ -9,6 +9,7 @@ import {
 import { usePortfolioStore } from "@/store/portfolioStore";
 import { Button } from "@/components/ui/Button";
 import Link from "next/link";
+import { DiagnosticsResponse } from "@/types";
 
 export function FeeBleedCalculator() {
   const { 
@@ -16,7 +17,32 @@ export function FeeBleedCalculator() {
     holdings
   } = usePortfolioStore();
 
-  const annualBleed = getWastedFeeAnnually();
+  const [diagnostics, setDiagnostics] = useState<DiagnosticsResponse | null>(null);
+
+  useEffect(() => {
+    const fetchDiagnostics = async () => {
+      const activeId = typeof window !== "undefined" ? localStorage.getItem("nivesh_active_portfolio_id") : null;
+      if (!activeId) return;
+      try {
+        const res = await fetch(`/api/portfolio/portfolios/${activeId}/diagnostics`);
+        if (res.ok) {
+          const data = await res.json();
+          setDiagnostics(data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch diagnostics for fee bleed:", err);
+      }
+    };
+
+    fetchDiagnostics();
+    const handleUpdate = () => { fetchDiagnostics(); };
+    window.addEventListener("nivesh_portfolio_updated", handleUpdate);
+    return () => window.removeEventListener("nivesh_portfolio_updated", handleUpdate);
+  }, []);
+
+  const annualBleed = diagnostics?.fee_analysis?.total_annual_cost ?? getWastedFeeAnnually();
+  const regularBleed = diagnostics?.fee_analysis?.regular_plan_annual_bleed ?? Math.round(annualBleed * 0.65);
+  const duplicateTer = diagnostics?.fee_analysis?.potential_duplicate_ter_cost ?? Math.max(0, annualBleed - regularBleed);
   const [cagrExpectation, setCagrExpectation] = useState(12);
 
   // Compounding calculation: PMT=annualBleed, r=cagrExpectation%, n=years
@@ -68,8 +94,8 @@ export function FeeBleedCalculator() {
           <div className="p-3.5 rounded-xl bg-[var(--negative)]/10 border border-[var(--negative)]/20 text-xs text-[var(--negative)]">
             <strong className="font-bold text-[var(--negative)]">Where is this money going?</strong>
             <ul className="mt-1.5 space-y-1 text-[11px] text-muted-foreground">
-              <li>• <strong className="text-foreground">₹16,600</strong> in Regular Plan broker commissions across 2 funds.</li>
-              <li>• <strong className="text-foreground">₹8,200</strong> in duplicate Total Expense Ratios (TER) for overlapping stocks.</li>
+              <li>• <strong className="text-foreground">₹{regularBleed.toLocaleString("en-IN")}</strong> in Regular Plan broker commissions{regularFunds.length > 0 ? ` across ${regularFunds.length} fund${regularFunds.length > 1 ? "s" : ""}` : ""}.</li>
+              <li>• <strong className="text-foreground">₹{duplicateTer.toLocaleString("en-IN")}</strong> in duplicate Total Expense Ratios (TER) for overlapping stocks.</li>
             </ul>
           </div>
 

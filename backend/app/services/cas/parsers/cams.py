@@ -91,6 +91,31 @@ def _extract_amc(block: str) -> str | None:
     return _clean(match.group("amc"))
 
 
+def _extract_nominee(block: str) -> tuple[str, str | None]:
+    """
+    Extract nominee registration status and name from CAMS folio header.
+    Returns (status, nominee_name) where status is CONFIRMED, MISSING, or UNKNOWN.
+    """
+    match = re.search(
+        r"Nominee\s*(?:1)?\s*:\s*(?P<nominee>[^\n|]+)",
+        block,
+        re.IGNORECASE,
+    )
+    if not match:
+        return "UNKNOWN", None
+
+    val = _clean(match.group("nominee"))
+    val_upper = val.upper()
+    if val_upper in ("NOT REGISTERED", "NONE", "UNASSIGNED", "NO", "NOT APPLICABLE", "NIL"):
+        return "MISSING", None
+    elif val_upper in ("REGISTERED", "YES", "OK", "AVAILABLE"):
+        return "CONFIRMED", None
+    elif val:
+        return "CONFIRMED", val
+
+    return "UNKNOWN", None
+
+
 def _extract_scheme_blocks(block: str) -> list[tuple[str, str]]:
     """
     Split a folio block into individual schemes.
@@ -244,6 +269,7 @@ def parse_cams(text: str) -> RawCASData:
 
     for folio, folio_block in folio_blocks:
         amc = _extract_amc(folio_block)
+        nom_status, nom_name = _extract_nominee(folio_block)
 
         scheme_blocks = _extract_scheme_blocks(folio_block)
 
@@ -266,6 +292,8 @@ def parse_cams(text: str) -> RawCASData:
                     folio_number=folio,
                     amc=amc,
                     advisor=advisor,
+                    nominee_status=nom_status,
+                    nominee_name=nom_name,
                 )
             )
 

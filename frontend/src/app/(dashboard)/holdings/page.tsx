@@ -145,7 +145,8 @@ export default function HoldingsPage() {
     }
 
     const handleUpdated = () => {
-      void loadPortfolio();
+      setIsLoading(true);
+      void loadPortfolio().finally(() => setIsLoading(false));
     };
 
     if (typeof window !== "undefined") {

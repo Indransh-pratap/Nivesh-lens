@@ -29,6 +29,7 @@ from app.services.groups.exposure import calculate_group_exposure
 from app.services.sip.health import calculate_sip_health
 from app.services.exposure.company_exposure import calculate_company_exposure
 from app.services.exposure.lookthrough_service import calculate_portfolio_lookthrough
+from app.services.reports.pdf_generator import generate_portfolio_diagnostic_pdf
 
 router = APIRouter(prefix="/portfolios")
 
@@ -200,3 +201,35 @@ def remove_portfolio(portfolio_id: uuid.UUID, db: Session = Depends(get_db), use
     except portfolio_service.PortfolioNotFoundError:
         not_found()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.get("/{portfolio_id}/pdf")
+def get_portfolio_pdf_report(
+    portfolio_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+) -> Response:
+    try:
+        portfolio = portfolio_service.get_owned_portfolio(db, user_id, portfolio_id)
+    except portfolio_service.PortfolioNotFoundError:
+        not_found()
+
+    diagnostics_data = build_diagnostics(
+        str(portfolio.id),
+        portfolio.holdings,
+        portfolio.total_value,
+        db,
+    )
+    pdf_bytes = generate_portfolio_diagnostic_pdf(
+        portfolio_name=portfolio.name,
+        diagnostics=diagnostics_data,
+        client_name=f"User {user_id[:8]}",
+    )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="nivesh_lens_audit_{portfolio.id}.pdf"',
+        },
+    )
+

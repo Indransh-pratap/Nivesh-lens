@@ -2,16 +2,16 @@
 
 import React from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
-import { CrashSimulator } from "@/components/dashboard/CrashSimulator";
+import { CrashSimulator } from "@/components/phase2/CrashSimulator";
 import { MacroSliders } from "@/components/dashboard/MacroSliders";
 
 export default function StressTesterPage() {
   return (
     <div className="space-y-8 pb-12">
       <PageHeader
-        eyebrow="CRASH TESTER"
-        title="Stress-Testing & Crisis Time Machine"
-        description="Historical crisis replay and real-time macroeconomic shock parameter simulations"
+        eyebrow="STRESS TESTER"
+        title="Crash Stress-Testing & Crisis Time Machine"
+        description="Replay historical market drawdowns (COVID 2020, 2008 Lehman, 2022 Bear) directly against your current portfolio positions."
       />
 
       <CrashSimulator />
@@ -19,3 +19,4 @@ export default function StressTesterPage() {
     </div>
   );
 }
+

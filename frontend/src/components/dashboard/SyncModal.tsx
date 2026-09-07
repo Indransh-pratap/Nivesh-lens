@@ -48,6 +48,29 @@ export function SyncModal() {
   const [mobileNumber, setMobileNumber] = useState("9876543210");
   const [panNumber, setPanNumber] = useState("ABCDE1234F");
 
+  const [otpStage, setOtpStage] = useState<"input" | "verify">("input");
+  const [otpCode, setOtpCode] = useState("");
+  const [otpRequestId, setOtpRequestId] = useState("");
+  const [otpError, setOtpError] = useState("");
+  const [otpLoading, setOtpLoading] = useState(false);
+  const [otpCountdown, setOtpCountdown] = useState(0);
+
+  useEffect(() => {
+    if (otpCountdown <= 0) return;
+    const timer = setInterval(() => {
+      setOtpCountdown((c) => Math.max(0, c - 1));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [otpCountdown]);
+
+  useEffect(() => {
+    setOtpStage("input");
+    setOtpCode("");
+    setOtpRequestId("");
+    setOtpError("");
+    setOtpCountdown(0);
+  }, [isSyncModalOpen, activeTab]);
+
   const [casPassword, setCasPassword] = useState("");
   const [casFile, setCasFile] = useState<File | null>(null);
   const [casError, setCasError] = useState("");
@@ -305,12 +328,148 @@ export function SyncModal() {
     }
   };
 
+  const handleRequestOtp = async () => {
+    if (!validateOtpFields()) return;
+    setOtpError("");
+    setOtpLoading(true);
+
+    try {
+      const response = await fetch("/api/portfolio/cas/otp/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          identifier: mobileNumber.trim() || panNumber.trim(),
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(data?.error?.message || data?.detail || "Failed to send OTP.");
+      }
+
+      setOtpRequestId(data.request_id);
+      setOtpStage("verify");
+      setOtpCountdown(60);
+    } catch (err: any) {
+      setOtpError(err?.message || "Failed to send OTP. Please check your connection.");
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!otpCode || otpCode.trim().length !== 6) {
+      setOtpError("Please enter the 6-digit OTP received on your mobile.");
+      return;
+    }
+    setOtpError("");
+    setOtpLoading(true);
+
+    usePortfolioStore.setState({
+      isSyncing: true,
+      syncProgress: 40,
+      syncStep: "Verifying OTP with Account Aggregator...",
+    });
+
+    try {
+      const response = await fetch("/api/portfolio/cas/otp/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          request_id: otpRequestId,
+          otp: otpCode.trim(),
+        }),
+      });
+
+      const data = await response.json().catch(() => null);
+      if (!response.ok) {
+        usePortfolioStore.setState({ isSyncing: false });
+        throw new Error(data?.error?.message || data?.detail || "Invalid OTP code.");
+      }
+
+      usePortfolioStore.setState({
+        syncProgress: 80,
+        syncStep: "Synchronizing investment holdings & look-through...",
+      });
+
+      const portfolioId = data?.portfolio_id;
+      if (portfolioId) {
+        if (typeof window !== "undefined") {
+          localStorage.setItem("nivesh_active_portfolio_id", portfolioId);
+          window.dispatchEvent(
+            new CustomEvent("nivesh_portfolio_updated", {
+              detail: { portfolioId },
+            })
+          );
+        }
+
+        const portResp = await fetch(`/api/portfolio/portfolios/${portfolioId}`).catch(() => null);
+        if (portResp && portResp.ok) {
+          const portData = await portResp.json().catch(() => null);
+          if (Array.isArray(portData?.holdings) && portData.holdings.length > 0) {
+            const mappedHoldings: Holding[] = portData.holdings.map((h: any, idx: number) => {
+              const curVal = Number(h.current_value ?? h.currentValue) || 0;
+              const qty = Number(h.quantity ?? h.units) || 0;
+              const avgCost = Number(h.average_cost ?? h.avgPrice) || 0;
+              const curPrice = Number(h.current_price ?? h.currentPrice) || 0;
+              const totalVal = Number(portData.total_value) || 1;
+              const isMF = h.asset_type === "MUTUAL_FUND" || (h.type && h.type.includes("Mutual"));
+              return {
+                id: String(h.id ?? `aa_${Date.now()}_${idx}`),
+                name: h.security_name || h.name || "Holding",
+                type: isMF ? "Mutual Fund" : "Stock",
+                ticker: h.ticker || (h.isin ? h.isin.slice(0, 6) : `SEC_${idx + 1}`),
+                isin: h.isin,
+                quantity: qty,
+                units: qty,
+                avgPrice: avgCost,
+                averageCost: avgCost,
+                currentValue: curVal,
+                currentPrice: curPrice,
+                returns: 0,
+                returnsValue: 0,
+                allocation: totalVal > 0 ? (curVal / totalVal) * 100 : 0,
+                planType: "Direct",
+                expenseRatio: isMF ? 0.007 : 0,
+                riskGrade: "Medium",
+                sector: isMF ? "Diversified MF" : "Equity",
+                nomineeStatus: "Verified",
+                assetClass: isMF ? "Mutual Fund" : "Equity",
+              } as Holding;
+            });
+            usePortfolioStore.getState().setHoldings(mappedHoldings);
+          }
+        }
+      }
+
+      usePortfolioStore.setState({
+        isSyncing: false,
+        isSyncModalOpen: false,
+        syncProgress: 100,
+        syncStep: "Account Aggregator Sync Successful!",
+        lastSyncedAt: new Date().toISOString(),
+        syncSource: "Account Aggregator",
+      });
+
+      const store = usePortfolioStore.getState();
+      if ("addToast" in store && typeof (store as any).addToast === "function") {
+        (store as any).addToast({
+          variant: "success",
+          title: "Account Aggregator Synced",
+          description: `${data?.holdings_count ?? 0} holdings synced successfully via RBI AA.`,
+        });
+      }
+    } catch (err: any) {
+      usePortfolioStore.setState({ isSyncing: false });
+      setOtpError(err?.message || "Failed to verify OTP. Please try again.");
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
   const handleStart = () => {
     if (activeTab === "OTP") {
-      if (!validateOtpFields()) return;
-
-      // OTP continues using the existing store flow.
-      startSync("OTP");
+      handleRequestOtp();
       return;
     }
 
@@ -410,116 +569,196 @@ export function SyncModal() {
               </div>
             </div>
 
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-semibold text-muted-foreground mb-1.5 font-sans">
-                  Registered Mobile Number
-                </label>
+            {otpError && (
+              <div
+                role="alert"
+                className="p-3 rounded-xl border border-[var(--negative)]/20 bg-[var(--negative)]/10 text-xs text-[var(--negative)] flex items-center gap-2"
+              >
+                <AlertCircle className="w-4 h-4 shrink-0" strokeWidth={1.75} />
+                <span>{otpError}</span>
+              </div>
+            )}
 
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-mono text-muted-foreground">
-                    +91
+            {otpStage === "input" ? (
+              <>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-muted-foreground mb-1.5 font-sans">
+                      Registered Mobile Number
+                    </label>
+
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-mono text-muted-foreground">
+                        +91
+                      </span>
+
+                      <input
+                        type="text"
+                        value={mobileNumber}
+                        onChange={(e) => {
+                          setMobileNumber(e.target.value);
+                          if (fieldErrors.mobile) {
+                            setFieldErrors((f) => ({
+                              ...f,
+                              mobile: undefined,
+                            }));
+                          }
+                        }}
+                        aria-invalid={!!fieldErrors.mobile}
+                        aria-describedby={
+                          fieldErrors.mobile ? "mobile-error" : undefined
+                        }
+                        className={`w-full h-10 pl-11 pr-3 bg-[var(--background-elevated)] border rounded-xl text-xs font-mono text-foreground outline-none transition-colors tabular-nums ${
+                          fieldErrors.mobile
+                            ? "border-[var(--negative)] focus:border-[var(--negative)]"
+                            : "border-border focus:border-primary/60"
+                        }`}
+                        placeholder="Enter 10-digit mobile number"
+                      />
+                    </div>
+
+                    {fieldErrors.mobile && (
+                      <p
+                        id="mobile-error"
+                        role="alert"
+                        className="mt-1 text-[11px] text-[var(--negative)]"
+                      >
+                        {fieldErrors.mobile}
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-muted-foreground mb-1.5 font-sans">
+                      PAN Card Number
+                    </label>
+
+                    <input
+                      type="text"
+                      value={panNumber}
+                      onChange={(e) => {
+                        setPanNumber(e.target.value.toUpperCase());
+                        if (fieldErrors.pan) {
+                          setFieldErrors((f) => ({
+                            ...f,
+                            pan: undefined,
+                          }));
+                        }
+                      }}
+                      aria-invalid={!!fieldErrors.pan}
+                      aria-describedby={fieldErrors.pan ? "pan-error" : undefined}
+                      className={`w-full h-10 px-3 bg-[var(--background-elevated)] border rounded-xl text-xs font-mono uppercase text-foreground outline-none transition-colors ${
+                        fieldErrors.pan
+                          ? "border-[var(--negative)] focus:border-[var(--negative)]"
+                          : "border-border focus:border-primary/60"
+                      }`}
+                      placeholder="ABCDE1234F"
+                      maxLength={10}
+                    />
+
+                    {fieldErrors.pan && (
+                      <p
+                        id="pan-error"
+                        role="alert"
+                        className="mt-1 text-[11px] text-[var(--negative)]"
+                      >
+                        {fieldErrors.pan}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="pt-2 flex items-center justify-between text-[11px] text-muted-foreground font-sans">
+                  <div className="flex items-center gap-1.5">
+                    <Building2
+                      className="w-3.5 h-3.5 text-primary"
+                      strokeWidth={1.75}
+                    />
+                    <span>Powered by Setu / Finvu AA & MF Central</span>
+                  </div>
+
+                  <span className="text-[var(--positive)] font-medium font-mono text-[10px]">
+                    256-Bit SSL
                   </span>
+                </div>
 
+                <Button
+                  onClick={handleRequestOtp}
+                  disabled={otpLoading}
+                  className="w-full h-11 text-xs font-semibold gap-2 mt-2"
+                >
+                  <span>{otpLoading ? "Sending OTP..." : "Send Secure OTP & Sync Everything"}</span>
+                  <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+                </Button>
+              </>
+            ) : (
+              <div className="space-y-4">
+                <div className="p-3 bg-[var(--background-elevated)] rounded-xl border border-border flex items-center justify-between text-xs">
+                  <div>
+                    <span className="text-muted-foreground">OTP sent to </span>
+                    <span className="font-mono font-semibold text-foreground">+91 {mobileNumber}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOtpStage("input");
+                      setOtpError("");
+                    }}
+                    className="text-primary hover:underline text-[11px] font-semibold"
+                  >
+                    Change
+                  </button>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-muted-foreground mb-1.5 font-sans">
+                    Enter 6-Digit OTP
+                  </label>
                   <input
                     type="text"
-                    value={mobileNumber}
+                    maxLength={6}
+                    autoFocus
+                    value={otpCode}
                     onChange={(e) => {
-                      setMobileNumber(e.target.value);
-
-                      if (fieldErrors.mobile) {
-                        setFieldErrors((f) => ({
-                          ...f,
-                          mobile: undefined,
-                        }));
-                      }
+                      const val = e.target.value.replace(/\D/g, "").slice(0, 6);
+                      setOtpCode(val);
+                      if (otpError) setOtpError("");
                     }}
-                    aria-invalid={!!fieldErrors.mobile}
-                    aria-describedby={
-                      fieldErrors.mobile ? "mobile-error" : undefined
-                    }
-                    className={`w-full h-10 pl-11 pr-3 bg-[var(--background-elevated)] border rounded-xl text-xs font-mono text-foreground outline-none transition-colors tabular-nums ${
-                      fieldErrors.mobile
-                        ? "border-[var(--negative)] focus:border-[var(--negative)]"
-                        : "border-border focus:border-primary/60"
-                    }`}
-                    placeholder="Enter 10-digit mobile number"
+                    placeholder="• • • • • •"
+                    className="w-full h-12 text-center text-xl tracking-[0.5em] font-mono font-bold bg-[var(--background-elevated)] border border-border rounded-xl text-foreground focus:border-primary/60 outline-none"
                   />
                 </div>
 
-                {fieldErrors.mobile && (
-                  <p
-                    id="mobile-error"
-                    role="alert"
-                    className="mt-1 text-[11px] text-[var(--negative)]"
-                  >
-                    {fieldErrors.mobile}
-                  </p>
-                )}
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground text-[11px]">
+                    {otpCountdown > 0 ? (
+                      `Resend OTP in ${otpCountdown}s`
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={handleRequestOtp}
+                        disabled={otpLoading}
+                        className="text-primary hover:underline font-semibold"
+                      >
+                        Resend OTP
+                      </button>
+                    )}
+                  </span>
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    Sandbox Code: 123456
+                  </span>
+                </div>
+
+                <Button
+                  onClick={handleVerifyOtp}
+                  disabled={otpLoading || otpCode.length !== 6}
+                  className="w-full h-11 text-xs font-semibold gap-2 mt-2"
+                >
+                  <span>{otpLoading ? "Verifying..." : "Verify OTP & Fetch Portfolio"}</span>
+                  <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
+                </Button>
               </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-muted-foreground mb-1.5 font-sans">
-                  PAN Card Number
-                </label>
-
-                <input
-                  type="text"
-                  value={panNumber}
-                  onChange={(e) => {
-                    setPanNumber(e.target.value.toUpperCase());
-
-                    if (fieldErrors.pan) {
-                      setFieldErrors((f) => ({
-                        ...f,
-                        pan: undefined,
-                      }));
-                    }
-                  }}
-                  aria-invalid={!!fieldErrors.pan}
-                  aria-describedby={fieldErrors.pan ? "pan-error" : undefined}
-                  className={`w-full h-10 px-3 bg-[var(--background-elevated)] border rounded-xl text-xs font-mono uppercase text-foreground outline-none transition-colors ${
-                    fieldErrors.pan
-                      ? "border-[var(--negative)] focus:border-[var(--negative)]"
-                      : "border-border focus:border-primary/60"
-                  }`}
-                  placeholder="ABCDE1234F"
-                  maxLength={10}
-                />
-
-                {fieldErrors.pan && (
-                  <p
-                    id="pan-error"
-                    role="alert"
-                    className="mt-1 text-[11px] text-[var(--negative)]"
-                  >
-                    {fieldErrors.pan}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div className="pt-2 flex items-center justify-between text-[11px] text-muted-foreground font-sans">
-              <div className="flex items-center gap-1.5">
-                <Building2
-                  className="w-3.5 h-3.5 text-primary"
-                  strokeWidth={1.75}
-                />
-                <span>Powered by Setu / Finvu AA & MF Central</span>
-              </div>
-
-              <span className="text-[var(--positive)] font-medium font-mono text-[10px]">
-                256-Bit SSL
-              </span>
-            </div>
-
-            <Button
-              onClick={handleStart}
-              className="w-full h-11 text-xs font-semibold gap-2 mt-2"
-            >
-              <span>Send Secure OTP & Sync Everything</span>
-              <ArrowRight className="w-4 h-4" strokeWidth={1.75} />
-            </Button>
+            )}
           </div>
         )}
 

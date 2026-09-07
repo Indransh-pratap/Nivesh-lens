@@ -28,6 +28,12 @@ import {
   RefreshCw,
   Award,
   ShieldCheck,
+  Sparkles,
+  History,
+  Layers,
+  Scale,
+  Building2,
+  Coins,
   type LucideIcon,
 } from "lucide-react";
 
@@ -143,19 +149,19 @@ export default function DashboardLayout({
             icon: ShieldAlert,
           },
           {
-            name: "Direct Holdings",
+            name: "Direct Holdings & CAS",
             href: "/holdings",
             icon: Briefcase,
-          },
-          {
-            name: "Mutual Fund Health",
-            href: "/mutual-funds",
-            icon: Landmark,
           },
           {
             name: "True Exposure Map",
             href: "/exposure",
             icon: LineChart,
+          },
+          {
+            name: "Mutual Fund Health",
+            href: "/mutual-funds",
+            icon: Landmark,
           },
         ],
       },
@@ -173,9 +179,29 @@ export default function DashboardLayout({
             icon: TrendingDown,
           },
           {
-            name: "SIP Alpha & Switch",
+            name: "Smart SIP Health",
             href: "/sip-health",
-            icon: RefreshCw,
+            icon: Coins,
+          },
+          {
+            name: "Conglomerate Exposure",
+            href: "/exposure",
+            icon: Building2,
+          },
+        ],
+      },
+      {
+        groupTitle: "Strategy & Simulation",
+        items: [
+          {
+            name: "What-If Fund Swap",
+            href: "/simulator",
+            icon: Sparkles,
+          },
+          {
+            name: "Simulation Studio",
+            href: "/phase2",
+            icon: Layers,
           },
           {
             name: "Tax Rebalancer",
@@ -185,17 +211,22 @@ export default function DashboardLayout({
         ],
       },
       {
-        groupTitle: "Wealth & Compliance",
+        groupTitle: "Governance & Compliance",
         items: [
-          {
-            name: "Family Aggregator",
-            href: "/family",
-            icon: Users,
-          },
           {
             name: "Nominee Audit",
             href: "/audit",
             icon: ShieldCheck,
+          },
+          {
+            name: "Advisor PDF Reports",
+            href: "/advisor",
+            icon: Award,
+          },
+          {
+            name: "Family Aggregator",
+            href: "/family",
+            icon: Users,
           },
           {
             name: "Dividend Calendar",
@@ -211,13 +242,8 @@ export default function DashboardLayout({
         ],
       },
       {
-        groupTitle: "Professional Tools",
+        groupTitle: "System & Developers",
         items: [
-          {
-            name: "Advisor Reports",
-            href: "/advisor",
-            icon: Award,
-          },
           {
             name: "API & Developers",
             href: "/api-sdk",
@@ -241,7 +267,12 @@ export default function DashboardLayout({
   const activeGroupTitle = useMemo(
     () =>
       navigationGroups.find((group) =>
-        group.items.some((item) => item.href === pathname)
+        group.items.some((item) => {
+          if (item.href === pathname) return true;
+          // Match URLs that include query params (e.g., /phase2?tab=stress)
+          if (item.href.startsWith(pathname + "?")) return true;
+          return false;
+        })
       )?.groupTitle ??
       navigationGroups[0]?.groupTitle,
     [navigationGroups, pathname]
@@ -421,7 +452,8 @@ export default function DashboardLayout({
 
                   {group.items.map((item) => {
                     const isActive =
-                      pathname === item.href;
+                      pathname === item.href ||
+                      (pathname === item.href.split("?")[0] && item.href.includes("?"));
                     const Icon = item.icon;
 
                     return (
@@ -601,7 +633,8 @@ export default function DashboardLayout({
                   {isGroupOpen &&
                     group.items.map((item) => {
                       const isActive =
-                        pathname === item.href;
+                        pathname === item.href ||
+                        (pathname === item.href.split("?")[0] && item.href.includes("?"));
                       const Icon = item.icon;
 
                       return (

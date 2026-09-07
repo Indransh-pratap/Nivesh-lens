@@ -50,7 +50,12 @@ function LoginPageInner() {
       router.push(target);
       router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to sign in. Please try again.");
+      const message = err instanceof Error ? err.message : "Unable to sign in. Please try again.";
+      if (message.toLowerCase().includes("fetch") || message.toLowerCase().includes("network")) {
+        setError("Cannot reach the authentication server. Please check your connection and try again.");
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }

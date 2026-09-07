@@ -4,7 +4,7 @@ import React from "react";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { AmfiLookThrough } from "@/components/dashboard/AmfiLookThrough";
 import { TrueCompanyExposure } from "@/components/dashboard/TrueCompanyExposure";
-import { ConglomerateExposure } from "@/components/dashboard/ConglomerateExposure";
+import { GroupExposureAlert } from "@/components/phase2/GroupExposureAlert";
 
 export default function ExposurePage() {
   return (
@@ -12,12 +12,13 @@ export default function ExposurePage() {
       <PageHeader
         eyebrow="CONSOLIDATED ANALYSIS"
         title="True Company & Conglomerate Exposure"
-        description="Detects double-dipping and aggregated corporate house concentration"
+        description="Unified look-through across direct equity and mutual funds, detecting single-entity concentration and parent group exposure."
       />
 
       <AmfiLookThrough />
       <TrueCompanyExposure defaultExpandedFirst />
-      <ConglomerateExposure />
+      <GroupExposureAlert />
     </div>
   );
 }
+

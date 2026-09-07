@@ -171,6 +171,12 @@ def calculate_portfolio_lookthrough(
                 )
             )
 
+        # Compute fund-level equity exposure vs cash/debt residual
+        fund_equity_val = sum((Decimal(str(item.exposure_value)) for item in fund_holding_items), Decimal("0"))
+        fund_sum_wt = sum((Decimal(str(item.weight_percent)) for item in fund_holding_items), Decimal("0"))
+        fund_cash_debt_wt = max(Decimal("0"), Decimal("100.0") - fund_sum_wt)
+        fund_cash_debt_val = max(Decimal("0"), holding_val - fund_equity_val)
+
         # Sort fund holdings by weight descending
         fund_holding_items.sort(key=lambda item: item.weight_percent, reverse=True)
 
@@ -182,14 +188,20 @@ def calculate_portfolio_lookthrough(
                 user_value=float(holding_val),
                 lookthrough_available=True,
                 as_of_date=as_of.isoformat() if as_of else None,
+                equity_exposure_value=round(float(fund_equity_val), 2),
+                cash_debt_value=round(float(fund_cash_debt_val), 2),
+                equity_weight_percent=round(float(fund_sum_wt), 2),
+                cash_debt_weight_percent=round(float(fund_cash_debt_wt), 2),
                 holdings=fund_holding_items,
             )
         )
 
     # Compile aggregated indirect company list
     company_items: list[IndirectCompanyExposureItem] = []
+    total_indirect_equity = Decimal("0")
     for acc in indirect_accumulators.values():
         tot_val = acc["total_exposure_val"]
+        total_indirect_equity += tot_val
         pct = (tot_val / total_portfolio_val) * Decimal("100") if total_portfolio_val > Decimal("0") else Decimal("0")
 
         # Sort contributing funds by exposure descending
@@ -218,12 +230,25 @@ def calculate_portfolio_lookthrough(
         provider=mf_provider,
     )
 
+    total_fund_cash_debt = max(Decimal("0"), total_mf_val - total_indirect_equity)
+    reconciled_diff = total_mf_val - (total_indirect_equity + total_fund_cash_debt)
+
+    if latest_as_of_date:
+        days_old = (date.today() - latest_as_of_date).days
+        data_status = "LIVE" if days_old <= 7 else "RECENT" if days_old <= 45 else "STALE"
+    else:
+        data_status = "UNKNOWN"
+
     return LookThroughResponse(
         portfolio_id=str(portfolio_id),
         portfolio_value=float(total_portfolio_val),
         total_mf_value=float(total_mf_val),
         data_as_of=latest_as_of_date.isoformat() if latest_as_of_date else None,
+        data_status=data_status,
         mf_lookthrough_available=all_mf_lookthrough_available if has_any_mf else True,
+        total_indirect_equity_value=round(float(total_indirect_equity), 2),
+        total_fund_cash_debt_value=round(float(total_fund_cash_debt), 2),
+        reconciliation_difference=round(float(reconciled_diff), 2),
         mutual_funds=scheme_items,
         companies=company_items,
         combined_companies=company_exposure_res.companies,

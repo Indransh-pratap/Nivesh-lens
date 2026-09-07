@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { 
   ShieldCheck, 
   Info, 
@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePortfolioStore } from "@/store/portfolioStore";
+import { DiagnosticsResponse } from "@/types";
 
 export function HealthScoreGauge() {
   const { 
@@ -20,7 +21,32 @@ export function HealthScoreGauge() {
     isWhatIfActive 
   } = usePortfolioStore();
 
-  const score = isWhatIfActive ? getWhatIfDiversificationScore() : getDiversificationScore();
+  const [diagnostics, setDiagnostics] = useState<DiagnosticsResponse | null>(null);
+
+  useEffect(() => {
+    const fetchDiagnostics = async () => {
+      const activeId = typeof window !== "undefined" ? localStorage.getItem("nivesh_active_portfolio_id") : null;
+      if (!activeId) return;
+      try {
+        const res = await fetch(`/api/portfolio/portfolios/${activeId}/diagnostics`);
+        if (res.ok) {
+          const data = await res.json();
+          setDiagnostics(data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch diagnostics:", err);
+      }
+    };
+
+    fetchDiagnostics();
+    const handleUpdate = () => { fetchDiagnostics(); };
+    window.addEventListener("nivesh_portfolio_updated", handleUpdate);
+    return () => window.removeEventListener("nivesh_portfolio_updated", handleUpdate);
+  }, []);
+
+  const score = isWhatIfActive 
+    ? getWhatIfDiversificationScore() 
+    : (diagnostics?.diversification_score?.score ?? getDiversificationScore());
   
   const { dashOffset, rating } = useMemo(() => {
     const minScore = 300;
@@ -43,12 +69,45 @@ export function HealthScoreGauge() {
     };
   }, [score]);
 
+  const p = diagnostics?.diversification_score?.pillars;
+
   const pillars = [
-    { name: "Asset Class Spread", score: 88, max: 100, icon: PieChart, note: "Well balanced Equity, Debt FD, and Global Tech.", status: "Optimal", color: "bg-[var(--positive)]" },
-    { name: "Single-Company Exposure", score: isWhatIfActive ? 82 : 64, max: 100, icon: Layers, note: isWhatIfActive ? "Overlaps trimmed via simulator." : "Heavy Reliance (14.6%) & HDFC (15.8%) concentration.", status: isWhatIfActive ? "Improved" : "Alert", color: isWhatIfActive ? "bg-[var(--positive)]" : "bg-[var(--warning)]" },
-    { name: "Scheme Overlap & TER", score: isWhatIfActive ? 90 : 68, max: 100, icon: Coins, note: isWhatIfActive ? "Saved duplicate TER fees." : "42% common stocks in Flexi Cap & Bluechip.", status: isWhatIfActive ? "Optimal" : "Wasted Fees", color: isWhatIfActive ? "bg-[var(--positive)]" : "bg-[var(--negative)]" },
-    { name: "Conglomerate Balance", score: 79, max: 100, icon: Activity, note: "HDFC + Reliance Groups comprise ~32% of total capital.", status: "Moderate", color: "bg-[var(--info)]" },
-    { name: "Nominee & Compliance", score: 62, max: 100, icon: ShieldCheck, note: "2 MF Folios & FD missing verified legal nomination.", status: "Action Req.", color: "bg-[var(--negative)]" }
+    { 
+      name: "Asset Class Spread", 
+      score: p ? Math.round(p.asset_spread.score) : 88, 
+      max: 100, 
+      icon: PieChart, 
+      note: p ? p.asset_spread.note : "Well balanced Equity, Debt FD, and Global Tech.", 
+      status: p ? p.asset_spread.status : "Optimal", 
+      color: "bg-[var(--positive)]" 
+    },
+    { 
+      name: "Single-Company Exposure", 
+      score: isWhatIfActive ? 82 : (p ? Math.round(p.single_company_exposure.score) : 64), 
+      max: 100, 
+      icon: Layers, 
+      note: isWhatIfActive ? "Overlaps trimmed via simulator." : (p ? p.single_company_exposure.note : "Single company exposure evaluated across direct and indirect holdings."), 
+      status: isWhatIfActive ? "Improved" : (p ? p.single_company_exposure.status : "Alert"), 
+      color: isWhatIfActive ? "bg-[var(--positive)]" : (p && p.single_company_exposure.score < 60 ? "bg-[var(--negative)]" : "bg-[var(--warning)]") 
+    },
+    { 
+      name: "Scheme Overlap & TER", 
+      score: isWhatIfActive ? 90 : (p ? Math.round(p.scheme_overlap_ter.score) : 68), 
+      max: 100, 
+      icon: Coins, 
+      note: isWhatIfActive ? "Saved duplicate TER fees." : (p ? p.scheme_overlap_ter.note : "Regular plan and duplicate fee analysis."), 
+      status: isWhatIfActive ? "Optimal" : (p ? p.scheme_overlap_ter.status : "Moderate"), 
+      color: isWhatIfActive ? "bg-[var(--positive)]" : (p && p.scheme_overlap_ter.score < 60 ? "bg-[var(--negative)]" : "bg-[var(--info)]") 
+    },
+    { 
+      name: "Nominee Compliance", 
+      score: p ? Math.round(p.nominee_compliance.score) : 62, 
+      max: 100, 
+      icon: ShieldCheck, 
+      note: p ? p.nominee_compliance.note : "Legal nominee safeguard check across registered folios.", 
+      status: p ? p.nominee_compliance.status : "Action Req.", 
+      color: p && p.nominee_compliance.score >= 80 ? "bg-[var(--positive)]" : "bg-[var(--negative)]" 
+    }
   ];
 
   return (

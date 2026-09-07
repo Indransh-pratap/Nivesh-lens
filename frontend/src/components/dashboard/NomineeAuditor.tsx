@@ -1,25 +1,51 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { 
   ShieldCheck, 
   AlertTriangle, 
-  CheckCircle2
+  CheckCircle2,
+  HelpCircle
 } from "lucide-react";
 import { usePortfolioStore } from "@/store/portfolioStore";
 import { Button } from "@/components/ui/Button";
 import { InsightFlag } from "@/components/ui/InsightFlag";
+import { DiagnosticsResponse } from "@/types";
 
 type RelationshipType = "Spouse" | "Child" | "Parent" | "Sibling";
 
 export function NomineeAuditor() {
   const { nominees, updateNominee } = usePortfolioStore();
+  const [diagnostics, setDiagnostics] = useState<DiagnosticsResponse | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [tempNomineeName, setTempNomineeName] = useState("");
   const [tempRelation, setTempRelation] = useState<RelationshipType>("Spouse");
   const tableRef = useRef<HTMLDivElement>(null);
 
-  const missingCount = nominees.filter(n => n.status === "Action Required").length;
+  useEffect(() => {
+    const fetchDiagnostics = async () => {
+      const activeId = typeof window !== "undefined" ? localStorage.getItem("nivesh_active_portfolio_id") : null;
+      if (!activeId) return;
+      try {
+        const res = await fetch(`/api/portfolio/portfolios/${activeId}/diagnostics`);
+        if (res.ok) {
+          const data = await res.json();
+          setDiagnostics(data);
+        }
+      } catch (err) {
+        console.error("Failed to fetch diagnostics for nominee auditor:", err);
+      }
+    };
+
+    fetchDiagnostics();
+    const handleUpdate = () => { fetchDiagnostics(); };
+    window.addEventListener("nivesh_portfolio_updated", handleUpdate);
+    return () => window.removeEventListener("nivesh_portfolio_updated", handleUpdate);
+  }, []);
+
+  const audit = diagnostics?.nominee_audit;
+  const missingCount = audit ? audit.accounts_missing : nominees.filter(n => n.status === "Action Required").length;
+  const unknownCount = audit ? audit.accounts_unknown : 0;
 
   const handleFix = (id: string) => {
     updateNominee(id, {
@@ -32,6 +58,20 @@ export function NomineeAuditor() {
     });
     setEditingId(null);
   };
+
+  const displayAccounts = audit && audit.accounts.length > 0
+    ? audit.accounts.map((acc, idx) => ({
+        id: acc.account_id || `audit_${idx}`,
+        accountName: acc.account_name,
+        folioNumber: acc.masked_account_number,
+        accountType: acc.account_type,
+        nomineeName: acc.nominee_name || (acc.nominee_status === "CONFIRMED" ? "Registered" : acc.nominee_status === "MISSING" ? "Unassigned" : "Undisclosed"),
+        relationship: acc.relationship || (acc.nominee_status === "CONFIRMED" ? "Registered" : "—"),
+        allocation: 100,
+        status: acc.nominee_status === "CONFIRMED" ? "Verified" : acc.nominee_status === "MISSING" ? "Action Required" : "Information Pending",
+        lastUpdated: "CAS Audit",
+      }))
+    : nominees;
 
   return (
     <div className="rounded-2xl border border-border bg-[var(--card)] p-6 shadow-xl shadow-black/30 text-foreground relative overflow-hidden">
@@ -55,7 +95,7 @@ export function NomineeAuditor() {
         ) : (
           <div className="px-3 py-1.5 rounded-xl border border-[var(--positive)]/20 bg-[var(--positive)]/10 text-[var(--positive)] text-xs font-semibold flex items-center gap-1.5 self-start sm:self-auto">
             <CheckCircle2 className="w-4 h-4" strokeWidth={1.75} />
-            <span>100% Nominee Compliant</span>
+            <span>{unknownCount > 0 ? `${audit?.accounts_confirmed ?? 0} Confirmed (${unknownCount} Undisclosed)` : "100% Nominee Compliant"}</span>
           </div>
         )}
       </div>
@@ -87,8 +127,9 @@ export function NomineeAuditor() {
             </tr>
           </thead>
           <tbody className="divide-y divide-border/70">
-            {nominees.map((item) => {
+            {displayAccounts.map((item) => {
               const isActionReq = item.status === "Action Required";
+              const isPending = item.status === "Information Pending";
               return (
                 <tr key={item.id} className={`transition-colors ${isActionReq ? "bg-[var(--negative)]/[0.03] hover:bg-[var(--negative)]/[0.06]" : "hover:bg-accent"}`}>
                   <td className="py-3.5 px-4 font-sans font-bold text-foreground">
@@ -136,9 +177,11 @@ export function NomineeAuditor() {
                     <span className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border inline-flex items-center gap-1 ${
                       isActionReq 
                         ? "bg-[var(--negative)]/10 text-[var(--negative)] border-[var(--negative)]/20" 
+                        : isPending
+                        ? "bg-[var(--warning)]/10 text-[var(--warning)] border-[var(--warning)]/20"
                         : "bg-[var(--positive)]/10 text-[var(--positive)] border-[var(--positive)]/20"
                     }`}>
-                      {isActionReq ? <AlertTriangle className="w-3 h-3" strokeWidth={1.75} /> : <CheckCircle2 className="w-3 h-3" strokeWidth={1.75} />}
+                      {isActionReq ? <AlertTriangle className="w-3 h-3" strokeWidth={1.75} /> : isPending ? <HelpCircle className="w-3 h-3" strokeWidth={1.75} /> : <CheckCircle2 className="w-3 h-3" strokeWidth={1.75} />}
                       <span>{item.status}</span>
                     </span>
                   </td>

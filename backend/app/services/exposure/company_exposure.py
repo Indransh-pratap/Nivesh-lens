@@ -19,6 +19,7 @@ from app.schemas.exposure import (
 from app.services.cas.normalizer import normalize_security_name
 from app.services.market_data.seed_data import seed_market_baseline
 from app.services.amfi.provider import AMFIPortfolioProvider
+from app.services.diagnostics.hhi_engine import HHIItem, calculate_portfolio_company_hhi
 
 
 @dataclass(frozen=True)
@@ -355,18 +356,29 @@ def calculate_company_exposure(
     accumulators: dict[str, CompanyAccumulator] = {}
     total_direct_val = Decimal("0")
     total_mf_val = Decimal("0")
+    total_cash_debt_val = Decimal("0")
+    total_unmapped_val = Decimal("0")
+    total_fund_cash_debt_val = Decimal("0")
 
     for holding in positive_holdings:
         holding_val = Decimal(str(holding.current_value))
 
         # Check AssetType (support both enum and string representation)
+        raw_asset_type = str(holding.asset_type).upper()
         is_stock = (
             holding.asset_type == AssetType.STOCK
-            or str(holding.asset_type).upper() in ("STOCK", "EQUITY")
+            or "STOCK" in raw_asset_type
+            or "EQUITY" in raw_asset_type
         )
         is_mf = (
             holding.asset_type == AssetType.MUTUAL_FUND
-            or "MUTUAL" in str(holding.asset_type).upper()
+            or "MUTUAL" in raw_asset_type
+        )
+        is_cash_debt = (
+            holding.asset_type in (AssetType.CASH, AssetType.BOND)
+            or "CASH" in raw_asset_type
+            or "BOND" in raw_asset_type
+            or "FD" in raw_asset_type
         )
 
         # ---------------------------------------------------------
@@ -416,6 +428,12 @@ def calculate_company_exposure(
                     if latest_as_of_date is None or as_of > latest_as_of_date:
                         latest_as_of_date = as_of
 
+                sum_wt = sum((sh.weight_percentage for sh in underlying_holdings), Decimal("0"))
+                if sum_wt < Decimal("100.0"):
+                    # Residual in fund is cash, debt, or unmapped liquid assets
+                    fund_residual = (holding_val * (Decimal("100.0") - sum_wt)) / Decimal("100.0")
+                    total_fund_cash_debt_val += max(Decimal("0"), fund_residual)
+
                 for sh in underlying_holdings:
                     # exposure = fund_val * (weight / 100)
                     exposure = (holding_val * sh.weight_percentage) / Decimal("100")
@@ -426,7 +444,6 @@ def calculate_company_exposure(
                         name=sh.company_name,
                         isin=sh.company_isin,
                     )
-                    # If sector was not found before, take it from scheme holding
                     c_sector = c_sector or sh.sector
 
                     key = c_id
@@ -444,6 +461,16 @@ def calculate_company_exposure(
                         sh=sh,
                         exposure=exposure,
                     )
+            else:
+                total_unmapped_val += holding_val
+
+        # ---------------------------------------------------------
+        # 3. CASH, DEBT, OR UNMAPPED ASSETS
+        # ---------------------------------------------------------
+        elif is_cash_debt:
+            total_cash_debt_val += holding_val
+        else:
+            total_unmapped_val += holding_val
 
     # Compile result items
     companies: list[CompanyExposureItem] = []
@@ -481,12 +508,49 @@ def calculate_company_exposure(
     if has_mf_holding and mf_with_disclosures == 0:
         mf_lookthrough_available = False
 
+    # Portfolio asset reconciliation
+    total_cash_debt = total_cash_debt_val + total_fund_cash_debt_val
+    mapped_company_total = sum((acc.direct_value + acc.mutual_fund_value for acc in accumulators.values()), Decimal("0"))
+    reconciled_total = mapped_company_total + total_unmapped_val + total_cash_debt
+    reconciliation_diff = total_portfolio_value - reconciled_total
+
+    # Data Freshness Provenance
+    if latest_as_of_date:
+        days_old = (date.today() - latest_as_of_date).days
+        data_status = "LIVE" if days_old <= 7 else "RECENT" if days_old <= 45 else "STALE"
+    else:
+        data_status = "LIVE" if total_direct_val > Decimal("0") and not has_mf_holding else "UNKNOWN"
+
+    # Calculate portfolio HHI score
+    hhi_items = [
+        HHIItem(
+            identifier=acc.company_id,
+            name=acc.company_name,
+            weight_percentage=(acc.direct_value + acc.mutual_fund_value) / total_portfolio_value * Decimal("100"),
+        )
+        for acc in accumulators.values()
+    ]
+    hhi_res = calculate_portfolio_company_hhi(
+        company_exposures=hhi_items,
+        total_portfolio_value=total_portfolio_value,
+        unmapped_value=total_unmapped_val + total_cash_debt,
+    )
+
     return CompanyExposureResponse(
         portfolio_id=str(portfolio_id),
         portfolio_value=float(total_portfolio_value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
         data_as_of=str(latest_as_of_date) if latest_as_of_date else None,
+        data_status=data_status,
         mf_lookthrough_available=mf_lookthrough_available,
         total_direct_value=float(total_direct_val.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
         total_mf_value=float(total_mf_val.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
+        unmapped_value=float(total_unmapped_val.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
+        unmapped_percent=float((total_unmapped_val / total_portfolio_value * Decimal("100")).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)) if total_portfolio_value > 0 else 0.0,
+        cash_debt_value=float(total_cash_debt.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
+        cash_debt_percent=float((total_cash_debt / total_portfolio_value * Decimal("100")).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)) if total_portfolio_value > 0 else 0.0,
+        reconciled_total_value=float(reconciled_total.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
+        reconciliation_difference=float(reconciliation_diff.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
+        hhi_score=hhi_res.hhi_score,
+        hhi_classification=hhi_res.classification,
         companies=companies,
     )

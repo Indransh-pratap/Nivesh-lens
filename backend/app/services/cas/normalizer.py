@@ -140,84 +140,26 @@ def _normalize_transaction_type(
         raw.upper(),
     ).strip("_")
 
-    # Direct enum match.
+    # Direct enum match
     for member in TransactionType:
-        if member.name.upper() == normalized:
+        if member.name.upper() == normalized or str(member.value).upper() == normalized:
             return member
 
-        if str(member.value).upper() == normalized:
-            return member
+    # Common CAS transaction types
+    if any(k in normalized for k in ("DIVIDEND", "DIV_REINVEST")):
+        return TransactionType.DIVIDEND
+    if any(k in normalized for k in ("INTEREST", "COUPON")):
+        return TransactionType.INTEREST
+    if any(k in normalized for k in ("REDEMPTION", "REDEEM", "SELL", "SALE", "SOLD", "SWITCH_OUT", "SWP")):
+        return TransactionType.SELL
+    if any(k in normalized for k in ("PURCHASE", "BUY", "SIP", "SWITCH_IN", "STP_IN", "SUBSCRIPTION")):
+        return TransactionType.BUY
+    if any(k in normalized for k in ("BONUS", "SPLIT", "RIGHTS")):
+        return TransactionType.BUY
+    if any(k in normalized for k in ("TRANSFER", "SWITCH", "STP_OUT")):
+        return TransactionType.OTHER
 
-    # Common CAS aliases.
-    aliases = {
-        "BUY": (
-            "BUY",
-            "PURCHASE",
-            "PURCHASED",
-        ),
-        "PURCHASE": (
-            "PURCHASE",
-            "PURCHASED",
-            "BUY",
-        ),
-        "PURCHASED": (
-            "PURCHASED",
-            "PURCHASE",
-            "BUY",
-        ),
-        "SELL": (
-            "SELL",
-            "SALE",
-            "SOLD",
-        ),
-        "SALE": (
-            "SALE",
-            "SOLD",
-            "SELL",
-        ),
-        "SOLD": (
-            "SOLD",
-            "SALE",
-            "SELL",
-        ),
-        "REDEEM": (
-            "REDEEM",
-            "REDEMPTION",
-        ),
-        "REDEMPTION": (
-            "REDEMPTION",
-            "REDEEM",
-        ),
-        "SWITCH": (
-            "SWITCH",
-        ),
-        "DIVIDEND": (
-            "DIVIDEND",
-        ),
-        "BONUS": (
-            "BONUS",
-        ),
-        "TRANSFER": (
-            "TRANSFER",
-        ),
-    }
-
-    candidates = aliases.get(
-        normalized,
-        (normalized,),
-    )
-
-    for candidate in candidates:
-
-        for member in TransactionType:
-
-            if member.name.upper() == candidate:
-                return member
-
-            if str(member.value).upper() == candidate:
-                return member
-
-    return None
+    return TransactionType.OTHER
 
 
 # ============================================================
@@ -284,6 +226,11 @@ def _normalize_holdings(
                     average_cost=average_cost,
                     current_value=current_value,
                     current_price=current_price,
+                    folio_number=getattr(item, "folio_number", None),
+                    amc=getattr(item, "amc", None),
+                    advisor=getattr(item, "advisor", None),
+                    nominee_status=getattr(item, "nominee_status", "UNKNOWN"),
+                    nominee_name=getattr(item, "nominee_name", None),
                 )
             )
 

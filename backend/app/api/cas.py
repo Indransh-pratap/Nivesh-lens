@@ -23,18 +23,14 @@ router = APIRouter(
 
 
 def get_nsdl_client() -> NsdlClient:
-    if not settings.nsdl_base_url or not settings.nsdl_api_key:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="CAS provider is not configured.",
-        )
-
+    is_live = bool(settings.nsdl_base_url and settings.nsdl_api_key)
     return NsdlClient(
-        base_url=settings.nsdl_base_url,
-        api_key=settings.nsdl_api_key,
+        base_url=settings.nsdl_base_url or "",
+        api_key=settings.nsdl_api_key or "",
         timeout=settings.nsdl_timeout,
+        is_sandbox=not is_live,
     )
-    
+
 
 def get_otp_service(
     nsdl_client: NsdlClient = Depends(get_nsdl_client),
@@ -95,6 +91,10 @@ async def verify_cas_otp(
         return CasOtpVerifyResponse(
             request_id=result.request_id,
             status=result.status,
+            portfolio_id=result.portfolio_id,
+            holdings_count=result.holdings_count,
+            total_value=result.total_value,
+            sync_id=result.request_id,
         )
 
     except CasOtpServiceError as exc:

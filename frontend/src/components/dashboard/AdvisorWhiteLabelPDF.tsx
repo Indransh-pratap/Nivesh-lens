@@ -4,7 +4,8 @@ import React, { useState } from "react";
 import { 
   FileCheck2, 
   Printer, 
-  Palette
+  Palette,
+  Download
 } from "lucide-react";
 import { usePortfolioStore } from "@/store/portfolioStore";
 import { Button } from "@/components/ui/Button";
@@ -20,10 +21,37 @@ export function AdvisorWhiteLabelPDF() {
   } = usePortfolioStore();
 
   const [isCustomizing, setIsCustomizing] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
   const selectedClient = advisorClients.find(c => c.id === selectedClientId) || advisorClients[0];
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleDownloadPdf = async () => {
+    const portfolioId = typeof window !== "undefined" ? localStorage.getItem("nivesh_active_portfolio_id") : null;
+    if (!portfolioId) {
+      window.print();
+      return;
+    }
+    setIsDownloading(true);
+    try {
+      const res = await fetch(`/api/portfolio/portfolios/${portfolioId}/pdf`);
+      if (!res.ok) throw new Error("Failed to generate PDF");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `nivesh_lens_audit_${portfolioId.slice(0, 8)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch {
+      window.print();
+    } finally {
+      setIsDownloading(false);
+    }
   };
 
   return (
@@ -52,12 +80,23 @@ export function AdvisorWhiteLabelPDF() {
           </Button>
 
           <Button 
+            variant="outline"
             size="sm"
             onClick={handlePrint}
-            className="text-xs gap-1.5 font-semibold"
+            className="text-xs gap-1.5"
           >
             <Printer className="w-3.5 h-3.5" strokeWidth={1.75} />
-            <span>Export Client PDF Audit</span>
+            <span>Print View</span>
+          </Button>
+
+          <Button 
+            size="sm"
+            onClick={handleDownloadPdf}
+            disabled={isDownloading}
+            className="text-xs gap-1.5 font-semibold"
+          >
+            <Download className="w-3.5 h-3.5" strokeWidth={1.75} />
+            <span>{isDownloading ? "Generating PDF..." : "Download Audit PDF"}</span>
           </Button>
         </div>
       </div>

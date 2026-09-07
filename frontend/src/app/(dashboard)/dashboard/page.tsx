@@ -23,8 +23,13 @@ import {
   Inbox,
   ShieldCheck,
   Bot,
+  MessageSquare,
   ChevronDown,
   MoreHorizontal,
+  Building2,
+  Scale,
+  ArrowLeftRight,
+  Gauge,
 } from "lucide-react";
 
 import { usePortfolioStore } from "@/store/portfolioStore";
@@ -644,6 +649,11 @@ export default function DashboardPage() {
         void loadPortfolio();
       };
 
+    const handlePortfolioUpdated =
+      () => {
+        void loadPortfolio();
+      };
+
     window.addEventListener(
       "focus",
       handleFocus
@@ -651,7 +661,7 @@ export default function DashboardPage() {
 
     window.addEventListener(
       "nivesh_portfolio_updated",
-      handleFocus
+      handlePortfolioUpdated
     );
 
     return () => {
@@ -661,7 +671,7 @@ export default function DashboardPage() {
       );
       window.removeEventListener(
         "nivesh_portfolio_updated",
-        handleFocus
+        handlePortfolioUpdated
       );
     };
   }, [loadPortfolio]);
@@ -873,8 +883,8 @@ export default function DashboardPage() {
     {
       id: "ai_advisor",
       label:
-        "AI Wealth Assistant",
-      icon: Bot,
+        "Diagnostic Assistant",
+      icon: MessageSquare,
     },
     {
       id: "lookthrough",
@@ -1284,6 +1294,140 @@ export default function DashboardPage() {
         <div className="space-y-8">
           {hasHoldings ? (
             <>
+              {/* Portfolio Intelligence & Risk Engines Matrix */}
+              <div className="rounded-2xl border border-border bg-card p-5 sm:p-6 shadow-sm space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-border">
+                  <div>
+                    <h3 className="text-sm font-bold text-foreground flex items-center gap-2">
+                      <Gauge className="w-4 h-4 text-primary" />
+                      Portfolio Intelligence & Risk Engines
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Deterministic diagnostics, group surveillance, crash simulation, and peer benchmarking
+                    </p>
+                  </div>
+                  <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground bg-accent px-2.5 py-1 rounded-md border border-border w-fit">
+                    Institutional Suite
+                  </span>
+                </div>
+
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                  {/* Card 1: Conglomerate Group Exposure */}
+                  <Link
+                    href="/exposure"
+                    className="p-3.5 rounded-xl border border-border hover:border-primary/50 bg-background/50 hover:bg-accent/40 transition-all group space-y-1.5 block"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs font-bold text-foreground">
+                        <Building2 className="w-3.5 h-3.5 text-primary" />
+                        Conglomerate Exposure
+                      </div>
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-accent border border-border text-muted-foreground group-hover:text-primary transition-colors">
+                        View &rarr;
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground line-clamp-2">
+                      Surveillance across business houses (Adani, Tata, Reliance, Birla) combining direct equities and indirect mutual fund ownership.
+                    </p>
+                  </Link>
+
+                  {/* Card 2: Peer Baseline Benchmarking */}
+                  <Link
+                    href="/risk"
+                    className="p-3.5 rounded-xl border border-border hover:border-primary/50 bg-background/50 hover:bg-accent/40 transition-all group space-y-1.5 block"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs font-bold text-foreground">
+                        <Scale className="w-3.5 h-3.5 text-primary" />
+                        Peer Benchmarking
+                      </div>
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-accent border border-border text-muted-foreground group-hover:text-primary transition-colors">
+                        Compare &rarr;
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground line-clamp-2">
+                      Evaluate concentration (HHI) and asset allocation against Retail Average, Aggressive Growth, and Conservative baselines.
+                    </p>
+                  </Link>
+
+                  {/* Card 3: Smart SIP Health & Auto-Switch */}
+                  <Link
+                    href="/sip-health"
+                    className="p-3.5 rounded-xl border border-border hover:border-primary/50 bg-background/50 hover:bg-accent/40 transition-all group space-y-1.5 block"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs font-bold text-foreground">
+                        <RefreshCw className="w-3.5 h-3.5 text-primary" />
+                        Smart SIP Health
+                      </div>
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-accent border border-border text-muted-foreground group-hover:text-primary transition-colors">
+                        Audit &rarr;
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground line-clamp-2">
+                      Letter-graded health audits (A-D) based on TER drag, rolling return percentiles, and non-destructive switch simulations.
+                    </p>
+                  </Link>
+
+                  {/* Card 4: Historical Crash Stress-Tester */}
+                  <Link
+                    href="/stress-tester"
+                    className="p-3.5 rounded-xl border border-border hover:border-primary/50 bg-background/50 hover:bg-accent/40 transition-all group space-y-1.5 block"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs font-bold text-foreground">
+                        <SlidersHorizontal className="w-3.5 h-3.5 text-primary" />
+                        Crash Stress-Tester
+                      </div>
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-accent border border-border text-muted-foreground group-hover:text-primary transition-colors">
+                        Replay &rarr;
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground line-clamp-2">
+                      Deterministic replay of COVID-19 crash, 2008 Lehman GFC, and interest rate spikes directly onto current holdings.
+                    </p>
+                  </Link>
+
+                  {/* Card 5: What-If Fund Swap Engine */}
+                  <Link
+                    href="/simulator"
+                    className="p-3.5 rounded-xl border border-border hover:border-primary/50 bg-background/50 hover:bg-accent/40 transition-all group space-y-1.5 block"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs font-bold text-foreground">
+                        <ArrowLeftRight className="w-3.5 h-3.5 text-primary" />
+                        What-If Fund Swap
+                      </div>
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-accent border border-border text-muted-foreground group-hover:text-primary transition-colors">
+                        Simulate &rarr;
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground line-clamp-2">
+                      Hypothetically swap funds to calculate immediate fee drag reduction, overlap delta, and net capital gain impact.
+                    </p>
+                  </Link>
+
+                  {/* Card 6: NAV Correlation Matrix */}
+                  <Link
+                    href="/risk"
+                    className="p-3.5 rounded-xl border border-border hover:border-primary/50 bg-background/50 hover:bg-accent/40 transition-all group space-y-1.5 block"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs font-bold text-foreground">
+                        <Activity className="w-3.5 h-3.5 text-primary" />
+                        NAV Correlation Heatmap
+                      </div>
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-accent border border-border text-muted-foreground group-hover:text-primary transition-colors">
+                        Analyze &rarr;
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground line-clamp-2">
+                      Pairwise Pearson correlation matrix identifying hidden portfolio overlap and redundancy between scheme NAVs.
+                    </p>
+                  </Link>
+                </div>
+              </div>
+
               <InteractivePortfolioChart />
 
               <InteractiveAllocationBreakdown />

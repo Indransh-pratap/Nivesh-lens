@@ -8,4 +8,6 @@ class DiagnosticResponse(BaseModel):
     diversification_score: dict
     concentration: dict
     top_company_exposures: list[dict]
-    alerts: list[dict]
+    fee_analysis: dict | None = None
+    nominee_audit: dict | None = None
+    alerts: list[dict] = []

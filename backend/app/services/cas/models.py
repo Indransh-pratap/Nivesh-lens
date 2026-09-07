@@ -20,6 +20,8 @@ class RawHolding:
     folio_number: str | None = None
     amc: str | None = None
     advisor: str | None = None
+    nominee_status: str = "UNKNOWN"
+    nominee_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -58,6 +60,8 @@ class CanonicalHolding:
     folio_number: str | None = None
     amc: str | None = None
     advisor: str | None = None
+    nominee_status: str = "UNKNOWN"
+    nominee_name: str | None = None
 
 
 @dataclass(frozen=True)

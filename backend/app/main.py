@@ -12,6 +12,7 @@ from app.api.cas import router as cas_router
 from app.api.health import router as health_router
 from app.api.portfolio import router as portfolio_router
 from app.api.imports import router as imports_router
+from app.api.phase2 import router as phase2_router
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -41,9 +42,13 @@ app.include_router(health_router, prefix="/api", tags=["health"])
 app.include_router(portfolio_router, prefix="/api", tags=["portfolios"])
 app.include_router(imports_router, prefix="/api", tags=["imports"])
 app.include_router(cas_router)
+app.include_router(phase2_router, prefix="/api", tags=["phase2"])
 
 def error_response(status_code: int, code: str, message: str) -> JSONResponse:
-    return JSONResponse(status_code=status_code, content={"error": {"code": code, "message": message}})
+    return JSONResponse(
+        status_code=status_code,
+        content={"error": {"code": code, "message": message}, "detail": message},
+    )
 
 
 @app.exception_handler(RequestValidationError)
@@ -55,8 +60,19 @@ async def validation_error_handler(_: Request, __: RequestValidationError) -> JS
 async def http_error_handler(_: Request, error: HTTPException) -> JSONResponse:
     if isinstance(error.detail, dict) and "code" in error.detail:
         return error_response(error.status_code, error.detail["code"], error.detail.get("message", "Request failed"))
-    messages = {401: ("UNAUTHORIZED", "Authentication required"), 403: ("FORBIDDEN", "You do not have access to this resource"), 404: ("PORTFOLIO_NOT_FOUND", "Portfolio not found"), 503: ("DATABASE_ERROR", "Database unavailable")}
-    code, message = messages.get(error.status_code, ("REQUEST_ERROR", "Request failed"))
+    messages = {
+        401: ("UNAUTHORIZED", "Authentication required"),
+        403: ("FORBIDDEN", "You do not have access to this resource"),
+        404: ("PORTFOLIO_NOT_FOUND", "Portfolio not found"),
+        503: ("DATABASE_ERROR", "Database unavailable"),
+    }
+    if error.status_code in messages:
+        default_code, default_msg = messages[error.status_code]
+        msg = error.detail if isinstance(error.detail, str) and error.detail else default_msg
+        return error_response(error.status_code, default_code, msg)
+
+    code = "REQUEST_ERROR"
+    message = error.detail if isinstance(error.detail, str) and error.detail else "Request failed"
     return error_response(error.status_code, code, message)
 
 

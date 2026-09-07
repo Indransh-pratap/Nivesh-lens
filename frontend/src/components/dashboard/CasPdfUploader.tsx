@@ -862,6 +862,9 @@ export function CasPdfUploader({
         ) {
           usePortfolioStore
             .getState()
+            .clearPortfolioData();
+          usePortfolioStore
+            .getState()
             .setHoldings(
               importedHoldings
             );

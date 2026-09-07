@@ -13,22 +13,33 @@ interface ResultItem {
   href: string;
 }
 
-const PAGE_INDEX: { label: string; href: string }[] = [
-  { label: "Overview", href: "/dashboard" },
-  { label: "Portfolio X-Ray", href: "/portfolio-xray" },
-  { label: "Holdings", href: "/holdings" },
-  { label: "Mutual Fund Health", href: "/mutual-funds" },
-  { label: "True Exposure", href: "/exposure" },
-  { label: "Risk & Correlation", href: "/risk" },
-  { label: "Crash Simulator", href: "/stress-tester" },
-  { label: "Fund Swap Simulator", href: "/simulator" },
-  { label: "Tax-Aware Rebalancer", href: "/tax" },
-  { label: "SIP Health", href: "/sip-health" },
-  { label: "Family Aggregator", href: "/family" },
-  { label: "Nominee Audit", href: "/audit" },
-  { label: "Dividend Calendar", href: "/dividends" },
-  { label: "Alerts", href: "/alerts" },
-  { label: "Settings", href: "/settings" },
+interface PageEntry {
+  label: string;
+  href: string;
+  keywords?: string;
+  section?: string;
+}
+
+const PAGE_INDEX: PageEntry[] = [
+  { label: "Executive Terminal", href: "/dashboard", keywords: "overview net worth portfolio pnl summary live terminal", section: "Intelligence" },
+  { label: "Portfolio X-Ray", href: "/portfolio-xray", keywords: "asset allocation overlap hhi health lookthrough", section: "Intelligence" },
+  { label: "Direct Holdings & CAS", href: "/holdings", keywords: "equities mutual funds folios stocks units", section: "Intelligence" },
+  { label: "True Company Exposure", href: "/exposure", keywords: "amfi lookthrough direct indirect company holdings", section: "Intelligence" },
+  { label: "Parent Conglomerate & Group Exposure", href: "/exposure", keywords: "group exposure conglomerate alert adani tata reliance birla bajaj l&t hdfc mahindra", section: "Risk" },
+  { label: "Risk & NAV Correlation Matrix", href: "/risk", keywords: "hhi concentration correlation matrix heatmap pairwise risk", section: "Risk" },
+  { label: "Peer Baseline Benchmarking", href: "/risk", keywords: "benchmark peer baseline retail aggressive growth conservative hybrid hhi returns compare", section: "Risk" },
+  { label: "Historical Crash Stress Tester", href: "/stress-tester", keywords: "crash test covid 2020 lehman 2008 gfc correction rate hike shock replay drawdown", section: "Risk" },
+  { label: "Smart SIP Health & Auto-Switch", href: "/sip-health", keywords: "sip health grade auto switch ter expense ratio underperformance simulation folios", section: "Risk" },
+  { label: "What-If Fund Swap Engine", href: "/simulator", keywords: "fund swap simulator what if switch replacement overlap reduction friction", section: "Strategy" },
+  { label: "Simulation Studio", href: "/phase2", keywords: "simulation studio scenario lab stress test swap benchmark", section: "Strategy" },
+  { label: "Tax-Aware Rebalancer", href: "/tax", keywords: "tax harvesting capital gains ltcg stcg loss offset", section: "Strategy" },
+  { label: "Nominee Audit & SEBI Compliance", href: "/audit", keywords: "nomination audit compliance sebi 100% legal folios", section: "Governance" },
+  { label: "Advisor PDF Reports", href: "/advisor", keywords: "pdf export report advisor download client presentation", section: "Governance" },
+  { label: "Family Aggregator", href: "/family", keywords: "pan household members aggregate family wealth", section: "Governance" },
+  { label: "Dividend Calendar", href: "/dividends", keywords: "dividends yield income cashflow schedule", section: "Governance" },
+  { label: "System Alerts", href: "/alerts", keywords: "notifications alerts warnings rebalance threshold", section: "Governance" },
+  { label: "API & Developer SDK", href: "/api-sdk", keywords: "api docs endpoints rest sdk openapi schema", section: "System" },
+  { label: "Settings", href: "/settings", keywords: "preferences configuration profile dark mode security", section: "System" },
 ];
 
 export function GlobalSearch() {
@@ -93,12 +104,12 @@ export function GlobalSearch() {
       }));
 
     const pageMatches: ResultItem[] = PAGE_INDEX
-      .filter((p) => p.label.toLowerCase().includes(q))
-      .slice(0, 4)
+      .filter((p) => p.label.toLowerCase().includes(q) || (p.keywords && p.keywords.toLowerCase().includes(q)))
+      .slice(0, 5)
       .map((p) => ({
-        id: `page-${p.href}`,
+        id: `page-${p.href}-${p.label}`,
         label: p.label,
-        meta: "Go to page",
+        meta: p.section ? `${p.section} · Jump to module` : "Go to module",
         icon: Compass,
         href: p.href,
       }));

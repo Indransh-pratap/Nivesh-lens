@@ -110,6 +110,8 @@ interface PortfolioState {
     holdings: Holding[]
   ) => void;
 
+  clearPortfolioData: () => void;
+
   openSyncModal: (
     method?: "OTP" | "CAS"
   ) => void;
@@ -345,6 +347,14 @@ export const usePortfolioStore =
             new Date().toISOString(),
           syncSource:
             "CAS Statement",
+        }),
+
+      clearPortfolioData: () =>
+        set({
+          holdings: [],
+          whatIfHoldings: [],
+          isWhatIfActive: false,
+          swappedFundsCount: 0,
         }),
 
       openSyncModal: (
@@ -826,80 +836,42 @@ export const usePortfolioStore =
             : 0;
         },
 
-      getHHIConcentrationScore:
-        () => {
-          const exposures =
-            get().companyExposures;
+      getHHIConcentrationScore: () => {
+        const exposures = get().companyExposures;
+        if (!exposures || exposures.length === 0) return 0;
+        const squaredSum = exposures.reduce(
+          (total, exposure) =>
+            total + (exposure.totalTruePercent || 0) * (exposure.totalTruePercent || 0),
+          0
+        );
+        return Math.min(Math.round(squaredSum), 10000);
+      },
 
-          const squaredSum =
-            exposures.reduce(
-              (
-                total,
-                exposure
-              ) =>
-                total +
-                exposure.totalTruePercent *
-                  exposure.totalTruePercent,
-              0
-            );
+      getDiversificationScore: () => {
+        const holdings = get().holdings;
+        if (holdings.length === 0) {
+          return 0;
+        }
+        const assetTypes = new Set(holdings.map((h) => h.type || h.assetClass));
+        const assetBonus = Math.min(assetTypes.size * 50, 150);
+        const holdingsBonus = Math.min(holdings.length * 15, 200);
+        return Math.min(Math.max(500 + assetBonus + holdingsBonus, 300), 900);
+      },
 
-          return Math.round(
-            squaredSum + 420
-          );
-        },
+      getWastedFeeAnnually: () => {
+        const regularFunds = get().holdings.filter(
+          (holding) => holding.type === "Mutual Fund" && holding.planType === "Regular"
+        );
 
-      getDiversificationScore:
-        () => {
-          const holdings =
-            get().holdings;
+        const regularBleed = regularFunds.reduce((total, fund) => {
+          const expenseRatio = fund.expenseRatio || 0.015;
+          const directEquivalent = Math.max(0.003, expenseRatio * 0.5);
+          const extraTer = Math.max(0, expenseRatio - directEquivalent);
+          return total + extraTer * (fund.currentValue || 0);
+        }, 0);
 
-          if (
-            holdings.length === 0
-          ) {
-            return 0;
-          }
-
-          return Math.min(
-            300 +
-              holdings.length *
-                55,
-            900
-          );
-        },
-
-      getWastedFeeAnnually:
-        () => {
-          const regularFunds =
-            get().holdings.filter(
-              (holding) =>
-                holding.planType ===
-                "Regular"
-            );
-
-          const regularBleed =
-            regularFunds.reduce(
-              (
-                total,
-                fund
-              ) => {
-                const extraTer =
-                  (fund.expenseRatio ||
-                    0.015) -
-                  0.006;
-
-                return (
-                  total +
-                  extraTer *
-                    fund.currentValue
-                );
-              },
-              0
-            );
-
-          return Math.round(
-            regularBleed
-          );
-        },
+        return Math.round(regularBleed);
+      },
 
       getTenYearCompoundedBleed:
         () => {
