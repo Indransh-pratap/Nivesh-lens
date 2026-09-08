@@ -149,6 +149,16 @@ export default function DashboardLayout({
             icon: ShieldAlert,
           },
           {
+            name: "AI Portfolio Assistant",
+            href: "/advanced",
+            icon: Sparkles,
+          },
+          {
+            name: "Portfolio News Impact",
+            href: "/news",
+            icon: Bell,
+          },
+          {
             name: "Direct Holdings & CAS",
             href: "/holdings",
             icon: Briefcase,
@@ -165,6 +175,7 @@ export default function DashboardLayout({
           },
         ],
       },
+
       {
         groupTitle: "Risk & Diagnostics",
         items: [

@@ -42,14 +42,30 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
     forwardHeaders["Content-Type"] = incomingContentType;
   }
 
-  const response = await fetch(`${fastApiUrl}${backendPath}`, {
-    method: request.method,
-    headers: forwardHeaders,
-    body: body.length ? body : undefined,
-    cache: "no-store",
-  });
-  const responseBody = await response.arrayBuffer();
-  return new NextResponse(responseBody, { status: response.status, headers: { "Content-Type": response.headers.get("Content-Type") ?? "application/json" } });
+  try {
+    const response = await fetch(`${fastApiUrl}${backendPath}`, {
+      method: request.method,
+      headers: forwardHeaders,
+      body: body.length ? body : undefined,
+      cache: "no-store",
+    });
+    const responseBody = await response.arrayBuffer();
+    return new NextResponse(responseBody, {
+      status: response.status,
+      headers: { "Content-Type": response.headers.get("Content-Type") ?? "application/json" },
+    });
+  } catch (error) {
+    console.error(`Failed to reach backend at ${fastApiUrl}${backendPath}:`, error);
+    return NextResponse.json(
+      {
+        error: {
+          code: "BACKEND_UNAVAILABLE",
+          message: `Unable to connect to the backend service at ${fastApiUrl}. Please ensure the FastAPI server is running.`,
+        },
+      },
+      { status: 503 }
+    );
+  }
 }
 
 export const GET = proxy;

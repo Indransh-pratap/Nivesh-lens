@@ -13,6 +13,7 @@ from app.api.health import router as health_router
 from app.api.portfolio import router as portfolio_router
 from app.api.imports import router as imports_router
 from app.api.phase2 import router as phase2_router
+from app.api.ai import router as ai_router
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     logging.basicConfig(level=settings.log_level)
+    logger.info("Nivesh Lens Backend initialized with AI layer active")
     yield
 
 
@@ -43,6 +45,8 @@ app.include_router(portfolio_router, prefix="/api", tags=["portfolios"])
 app.include_router(imports_router, prefix="/api", tags=["imports"])
 app.include_router(cas_router)
 app.include_router(phase2_router, prefix="/api", tags=["phase2"])
+app.include_router(ai_router, prefix="/api", tags=["ai"])
+
 
 def error_response(status_code: int, code: str, message: str) -> JSONResponse:
     return JSONResponse(

@@ -48,18 +48,22 @@ class CanonicalSchemeResolver:
     def clean_scheme_name(raw_name: str) -> str:
         if not raw_name:
             return ""
-        # 1. Strip CAS prefix acronyms like 'MAELC-', 'PPFCG-', 'SBILM-'
-        cleaned = re.sub(r"^[A-Za-z0-9]+-", "", raw_name).strip()
-        # 2. Strip plan/option suffixes like '- Direct Plan - Growth', '- Regular Plan', '- Regular - Dividend', etc.
+        # 1. Strip HTML tags like <br/>, <br>, <b>, etc.
+        cleaned = re.sub(r"<[^>]+>", " ", raw_name)
+        # 2. Strip Folio: ... patterns from CAS exports
+        cleaned = re.sub(r"Folio\s*:\s*[^\s]+", " ", cleaned, flags=re.IGNORECASE)
+        # 3. Strip CAS prefix acronyms like 'MAELC-', 'PPF03 ', 'UTI01 ', 'SBILM-'
+        cleaned = re.sub(r"^\s*[A-Za-z0-9]{2,10}[-\s]+", "", cleaned).strip()
+        # 4. Strip plan/option suffixes like '- Direct Plan - Growth', '- Regular Plan', '- Regular - Dividend', etc.
         cleaned = re.sub(
             r"\s*-\s*(Direct|Regular)(\s+Plan)?(\s*-\s*(Growth|IDCW|Dividend|Bonus|Reinvestment))?.*$",
             "",
             cleaned,
             flags=re.IGNORECASE,
         ).strip()
-        # 3. Strip trailing dashes or whitespace
+        # 5. Strip trailing dashes or whitespace
         cleaned = re.sub(r"[-–—\s]+$", "", cleaned).strip()
-        return cleaned
+        return " ".join(cleaned.split())
 
     @classmethod
     def clean_name(cls, raw_name: str) -> str:

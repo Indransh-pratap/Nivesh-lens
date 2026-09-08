@@ -16,12 +16,22 @@ from app.models.market_data import (
 
 logger = logging.getLogger(__name__)
 
+_seeded_market_data = False
+
 
 def seed_market_baseline(db: Session) -> None:
     """
     Seeds baseline benchmarks, company conglomerate groups, popular mutual fund schemes,
     historical benchmark prices (covering 2008, 2020, 2022 scenarios), and look-through scheme holdings.
     """
+    global _seeded_market_data
+    if _seeded_market_data:
+        return
+
+    # Fast check: if market data already seeded in DB, skip completely
+    if db.query(FundScheme).first() is not None and db.query(CompanyGroup).first() is not None:
+        _seeded_market_data = True
+        return
     # 1. Seed Benchmarks
     benchmarks_data = [
         ("NIFTY_50", "NIFTY 50", "^NSEI"),

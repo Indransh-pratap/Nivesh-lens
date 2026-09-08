@@ -4,17 +4,12 @@ import React, { useState, useEffect } from "react";
 import { 
   MessageSquare, 
   Send, 
-  Bot, 
-  User, 
-  Sparkles, 
-  ShieldCheck, 
   CheckCheck,
-  TrendingDown,
-  Coins,
-  Layers,
   ArrowRight
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn, formatINRCompact } from "@/lib/utils";
+import { authClient } from "@/lib/auth-client";
+import { usePortfolioStore } from "@/store/portfolioStore";
 
 interface ChatMessage {
   id: string;
@@ -25,39 +20,66 @@ interface ChatMessage {
   metrics?: { label: string; value: string; color?: string }[];
 }
 
-const INITIAL_MESSAGES: ChatMessage[] = [
-  {
-    id: "msg_1",
-    sender: "bot",
-    text: "Namaste Anubhav! 👋 I'm your Nivesh Lens AI Diagnostic Assistant. I've reconciled your 8 mutual fund folios and 6 direct equities.",
-    timestamp: "10:42 AM"
-  },
-  {
-    id: "msg_2",
-    sender: "bot",
-    text: "⚠️ Top Flag: Your true exposure to HDFC Bank is ₹5,52,354 (15.87% of your net worth) because you hold it both directly and inside 4 of your mutual funds.",
-    timestamp: "10:42 AM",
-    metrics: [
-      { label: "Direct Stock", value: "₹3.54L (10.18%)" },
-      { label: "Inside Funds", value: "₹1.98L (5.69%)" },
-      { label: "Total Tied", value: "₹5.52L (15.87%)", color: "text-[var(--negative)]" }
-    ]
-  }
-];
-
 const PROMPT_SUGGESTIONS = [
-  "How much am I losing in Regular plan fees?",
-  "What happens if NIFTY 50 drops 15%?",
-  "Check my SEBI Nominee compliance status",
-  "Which 3 stocks are in my top overlap?"
+  "How much HDFC Bank do I hold directly and indirectly?",
+  "What is my total portfolio value and health score?",
+  "What happens if NIFTY drops 15%?",
+  "Do I hold any duplicate mutual funds?",
+  "Check my SEBI Nominee compliance status"
 ];
 
 export function InteractiveWhatsAppAgent() {
-  const [messages, setMessages] = useState<ChatMessage[]>(INITIAL_MESSAGES);
+  const { data: session } = authClient.useSession();
+  const { holdings, companyExposures } = usePortfolioStore();
+
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputText, setInputText] = useState("");
   const [isTyping, setIsTyping] = useState(false);
 
-  const handleSend = (textToSend?: string) => {
+  // Initialize messages dynamically based on live authenticated user & real portfolio
+  useEffect(() => {
+    const userName = session?.user?.name ? session.user.name.split(" ")[0] : "Investor";
+    const totalVal = holdings.reduce((sum, h) => sum + (Number(h.currentValue) || 0), 0);
+    const topExp = companyExposures && companyExposures.length > 0 ? companyExposures[0] : null;
+
+    if (holdings.length > 0) {
+      const msgs: ChatMessage[] = [
+        {
+          id: "msg_init_1",
+          sender: "bot",
+          text: `Namaste ${userName}! 👋 I'm your Nivesh Lens AI Diagnostic Assistant. I've analyzed your live portfolio of ${holdings.length} assets valued at ${formatINRCompact(totalVal)}.`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }
+      ];
+
+      if (topExp && topExp.totalTruePercent > 0) {
+        msgs.push({
+          id: "msg_init_2",
+          sender: "bot",
+          text: `⚠️ Top Concentration: Your true exposure to ${topExp.companyName} is ${formatINRCompact(topExp.totalTrueValue)} (${topExp.totalTruePercent.toFixed(1)}% of your net worth) across direct and mutual fund holdings.`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          metrics: [
+            { label: "Direct Stock", value: `${topExp.directPercent.toFixed(1)}%` },
+            { label: "Inside Funds", value: `${topExp.indirectPercent.toFixed(1)}%` },
+            { label: "Total Concentration", value: `${topExp.totalTruePercent.toFixed(1)}%`, color: "text-[var(--negative)]" }
+          ]
+        });
+      }
+
+      setMessages(msgs);
+    } else {
+      setMessages([
+        {
+          id: "msg_init_empty",
+          sender: "bot",
+          text: `Namaste ${userName}! 👋 I'm your Nivesh Lens AI Assistant. Upload your CAS statement or ask me any question regarding your investment analytics, look-through exposure, or SEBI compliance.`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }
+      ]);
+    }
+  }, [session?.user?.name, holdings.length, companyExposures]);
+
+  const handleSend = async (textToSend?: string) => {
     const text = textToSend || inputText;
     if (!text.trim()) return;
 
@@ -72,55 +94,71 @@ export function InteractiveWhatsAppAgent() {
     setInputText("");
     setIsTyping(true);
 
-    // Simulate smart AI response
-    setTimeout(() => {
-      let botResponse: ChatMessage;
+    try {
+      // 1. Resolve active portfolio ID from localStorage or live API
+      let activePortfolioId = typeof window !== "undefined"
+        ? localStorage.getItem("nivesh_active_portfolio_id")
+        : null;
 
-      if (text.toLowerCase().includes("fee") || text.toLowerCase().includes("regular")) {
-        botResponse = {
-          id: `bot_${Date.now()}`,
-          sender: "bot",
-          text: "💡 You hold 3 Regular plan mutual funds paying ~1.25% in distributor commissions. Switching them to Direct plans saves ₹16,600/year, compounding to ₹4,35,200 extra wealth over 10 years!",
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          metrics: [
-            { label: "Annual Bleed", value: "₹24,800/yr", color: "text-[var(--negative)]" },
-            { label: "10Y Compounded", value: "+₹4.35 Lakhs", color: "text-[var(--positive)]" }
-          ]
-        };
-      } else if (text.toLowerCase().includes("drop") || text.toLowerCase().includes("crash") || text.toLowerCase().includes("15%")) {
-        botResponse = {
-          id: `bot_${Date.now()}`,
-          sender: "bot",
-          text: "📉 In a 15% broad market correction, your portfolio is projected to drawdown by ~12.8% (₹4.45 Lakhs). Your 13.8% liquid debt and corporate bonds provide strong shock absorption.",
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          metrics: [
-            { label: "Drawdown", value: "-₹4.45L (-12.8%)", color: "text-[var(--negative)]" },
-            { label: "Bond Buffer", value: "₹4.80L Safe", color: "text-[var(--positive)]" }
-          ]
-        };
-      } else if (text.toLowerCase().includes("nominee")) {
-        botResponse = {
-          id: `bot_${Date.now()}`,
-          sender: "bot",
-          text: "🛡️ 6 out of 8 folios have verified nominees. 2 folios (HDFC Flexi Cap and Mirae Asset Large Cap) are missing updated nominee details as required by recent SEBI circulars.",
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        };
-      } else {
-        botResponse = {
-          id: `bot_${Date.now()}`,
-          sender: "bot",
-          text: `📊 Analyzed! Your overall Diagnostic Health Score is 748/900 (Healthy - Top 16% Retail). Your portfolio has 88% asset diversity, with moderate banking concentration.`,
-          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          metrics: [
-            { label: "Health Score", value: "748 / 900", color: "text-[var(--positive)]" },
-            { label: "Retail Rank", value: "Top 16%" }
-          ]
-        };
+      if (!activePortfolioId) {
+        const portfoliosRes = await fetch("/api/portfolio/portfolios", { cache: "no-store" });
+        if (portfoliosRes.ok) {
+          const portfolios = await portfoliosRes.json();
+          if (Array.isArray(portfolios) && portfolios.length > 0) {
+            const active = portfolios.find((p: any) => p.holdings_count > 0 || p.total_value > 0) || portfolios[0];
+            activePortfolioId = active.id;
+            if (typeof window !== "undefined") {
+              localStorage.setItem("nivesh_active_portfolio_id", active.id);
+            }
+          }
+        }
       }
 
-      setMessages(prev => [...prev, botResponse]);
+      if (!activePortfolioId) {
+        throw new Error("No portfolio connected yet. Please upload your CAS statement or connect a broker.");
+      }
+
+      // 2. Call the live Ask My Portfolio AI endpoint
+      const chatRes = await fetch(`/api/portfolio/portfolios/${activePortfolioId}/ai/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: text }),
+      });
+
+      if (chatRes.ok) {
+        const chatData = await chatRes.json();
+        const metrics = chatData.supporting_facts?.slice(0, 3).map((fact: string, idx: number) => ({
+          label: idx === 0 ? "Fact 1" : idx === 1 ? "Fact 2" : "Fact 3",
+          value: fact.length > 50 ? fact.slice(0, 47) + "..." : fact,
+          color: "text-foreground",
+        }));
+
+        const botResponse: ChatMessage = {
+          id: `bot_${Date.now()}`,
+          sender: "bot",
+          text: chatData.answer,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          metrics: metrics && metrics.length > 0 ? metrics : undefined,
+        };
+
+        setMessages(prev => [...prev, botResponse]);
+        setIsTyping(false);
+        return;
+      } else {
+        const errData = await chatRes.json().catch(() => ({}));
+        throw new Error(errData.detail || errData.error?.message || "AI service returned an unexpected response.");
+      }
+    } catch (e: any) {
+      console.error("AI chat error:", e);
+      const errorResponse: ChatMessage = {
+        id: `bot_${Date.now()}`,
+        sender: "bot",
+        text: `⚠️ ${e?.message || "Unable to query portfolio analytics. Please verify your connection."}`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      setMessages(prev => [...prev, errorResponse]);
       setIsTyping(false);
-    }, 1100);
+    }
   };
 
   return (
@@ -135,14 +173,14 @@ export function InteractiveWhatsAppAgent() {
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-base font-bold text-foreground">Portfolio Diagnostic Assistant</h3>
-              <span className="w-2 h-2 rounded-full bg-primary" />
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
             </div>
-            <p className="text-xs text-muted-foreground font-mono">Automated portfolio queries, fee audits, and SEBI compliance checks</p>
+            <p className="text-xs text-muted-foreground font-mono">Live Gemini AI grounded in verified AMFI & SEBI deterministic analytics</p>
           </div>
         </div>
 
         <span className="text-[11px] font-mono px-2.5 py-1 rounded-xl bg-accent/40 border border-border text-muted-foreground hidden sm:inline">
-          AMFI + SEBI Connected
+          Deterministic Tools Active
         </span>
       </div>
 
@@ -161,7 +199,7 @@ export function InteractiveWhatsAppAgent() {
       </div>
 
       {/* Message Chat Container */}
-      <div className="h-[280px] overflow-y-auto space-y-3.5 p-4 rounded-xl bg-background border border-border no-scrollbar">
+      <div className="h-[300px] overflow-y-auto space-y-3.5 p-4 rounded-xl bg-background border border-border no-scrollbar">
         {messages.map((m) => (
           <div
             key={m.id}
@@ -172,14 +210,14 @@ export function InteractiveWhatsAppAgent() {
                 : "mr-auto bg-card border border-border text-foreground rounded-bl-none"
             )}
           >
-            <p className="leading-relaxed text-[12.5px]">{m.text}</p>
+            <p className="leading-relaxed text-[12.5px] whitespace-pre-wrap">{m.text}</p>
 
             {m.metrics && (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-2 border-t border-border font-mono text-[11px]">
-                {m.metrics.map((met) => (
-                  <div key={met.label} className="p-2 rounded-lg bg-accent/40 border border-border">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 border-t border-border font-mono text-[11px]">
+                {m.metrics.map((met, idx) => (
+                  <div key={idx} className="p-2 rounded-lg bg-accent/40 border border-border">
                     <span className="text-muted-foreground block text-[9.5px] font-sans">{met.label}</span>
-                    <span className={cn("font-bold text-xs", met.color || "text-foreground")}>{met.value}</span>
+                    <span className={cn("font-bold text-xs break-words", met.color || "text-foreground")}>{met.value}</span>
                   </div>
                 ))}
               </div>
@@ -200,7 +238,7 @@ export function InteractiveWhatsAppAgent() {
             <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce" />
             <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:0.2s]" />
             <span className="w-1.5 h-1.5 rounded-full bg-primary animate-bounce [animation-delay:0.4s]" />
-            <span className="text-[11px] font-mono ml-1">Analyzing portfolio look-through...</span>
+            <span className="text-[11px] font-mono ml-1">Consulting portfolio engines & Gemini 3.5...</span>
           </div>
         )}
       </div>
@@ -212,13 +250,14 @@ export function InteractiveWhatsAppAgent() {
           value={inputText}
           onChange={(e) => setInputText(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleSend()}
-          placeholder="Ask anything about your stocks, funds, overlap, or tax harvesting..."
+          placeholder="Ask anything about your stocks, mutual funds, true overlap, or stress test..."
           className="flex-1 h-11 px-4 rounded-xl bg-background border border-border text-xs text-foreground placeholder:text-muted-foreground/60 focus:border-primary outline-none transition-colors"
         />
         <button
           onClick={() => handleSend()}
+          disabled={isTyping}
           aria-label="Send message"
-          className="h-11 px-5 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-sm active:scale-95 transition-all"
+          className="h-11 px-5 rounded-xl bg-primary hover:bg-primary/90 disabled:opacity-50 text-primary-foreground font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-sm active:scale-95 transition-all"
         >
           <Send className="w-4 h-4" />
           <span className="hidden sm:inline">Ask AI</span>
