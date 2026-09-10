@@ -114,11 +114,24 @@ type ApiError = { error?: { code?: string; message?: string }; detail?: string }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const isGet = !init?.method || init.method.toUpperCase() === "GET";
-  const response = await fetch(`/api/portfolio${path}`, {
-    ...init,
-    cache: isGet ? "no-store" : init?.cache,
-    headers: { "Content-Type": "application/json", ...init?.headers },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30_000);
+  let response: Response;
+  try {
+    response = await fetch(`/api/portfolio${path}`, {
+      ...init,
+      signal: controller.signal,
+      cache: isGet ? "no-store" : init?.cache,
+      headers: { "Content-Type": "application/json", ...init?.headers },
+    });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("The request timed out. Please retry.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
   if (response.status === 401) {
     if (typeof window !== "undefined") {
       window.location.href = `/login?reason=session_expired&next=${encodeURIComponent(window.location.pathname)}`;
@@ -366,4 +379,3 @@ export async function postPhase2SIPSwitchSimulation(
     }
   );
 }
-

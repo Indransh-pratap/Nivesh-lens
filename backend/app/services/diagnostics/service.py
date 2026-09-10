@@ -134,9 +134,18 @@ def build_diagnostics(
         )
         for item in exposures
     ]
+    # Exposure look-through intentionally omits cash/debt and funds whose
+    # disclosures are unavailable. Keep that value in an explicit residual
+    # bucket so HHI still reflects the entire portfolio instead of collapsing
+    # to zero (or overstating concentration among only mapped companies).
+    mapped_exposure_value = sum(
+        (item.exposure_value for item in exposures), Decimal("0")
+    )
+    residual_exposure = max(Decimal("0"), total_value - mapped_exposure_value)
     hhi_result = calculate_portfolio_company_hhi(
         company_exposures=hhi_items,
         total_portfolio_value=total_value,
+        unmapped_value=residual_exposure,
     )
 
     # Asset class distribution

@@ -13,22 +13,34 @@ export class SessionExpiredError extends Error {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const isGet = !init?.method || init.method.toUpperCase() === "GET";
-  const response = await fetch(`/api/portfolio${path}`, {
-    ...init,
-    cache: isGet ? "no-store" : init?.cache,
-    headers: { "Content-Type": "application/json", ...init?.headers },
-  });
-  if (response.status === 401) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30_000);
+  try {
+    const response = await fetch(`/api/portfolio${path}`, {
+      ...init,
+      signal: controller.signal,
+      cache: isGet ? "no-store" : init?.cache,
+      headers: { "Content-Type": "application/json", ...init?.headers },
+    });
+    if (response.status === 401) {
     if (typeof window !== "undefined") {
       window.location.href = `/login?reason=session_expired&next=${encodeURIComponent(window.location.pathname)}`;
     }
     throw new SessionExpiredError();
-  }
-  if (!response.ok) {
+    }
+    if (!response.ok) {
     const body = (await response.json().catch(() => ({}))) as ApiError;
     throw new Error(body.error?.message ?? "Unable to complete the request");
+    }
+    return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("The request timed out. Please retry.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
   }
-  return response.status === 204 ? (undefined as T) : (response.json() as Promise<T>);
 }
 
 import type { CompanyExposureResponse, LookThroughResponse, DiagnosticsResponse } from "@/types";

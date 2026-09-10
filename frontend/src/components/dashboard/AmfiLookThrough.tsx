@@ -111,7 +111,7 @@ export function AmfiLookThrough({
         window.removeEventListener("nivesh_portfolio_updated", handleUpdated);
       }
     };
-  }, [loadData, holdings]);
+  }, [loadData]);
 
   const toggleCompany = (id: string) => {
     setExpandedCompanyIds((prev) => {

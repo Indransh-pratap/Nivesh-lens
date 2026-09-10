@@ -35,14 +35,18 @@ def ingest_scheme_nav_history(db: Session, scheme_code: str, provider: NAVProvid
         db.commit()
         db.refresh(scheme)
 
-    inserted_count = 0
-    for pt in nav_points:
-        existing = db.query(FundNAVHistory).filter(FundNAVHistory.scheme_id == scheme.id, FundNAVHistory.nav_date == pt.nav_date).first()
-        if not existing:
-            db.add(FundNAVHistory(scheme_id=scheme.id, nav_date=pt.nav_date, nav=pt.nav))
-            inserted_count += 1
-
-    db.commit()
+    existing_dates = set(
+        p[0] for p in db.query(FundNAVHistory.nav_date).filter(FundNAVHistory.scheme_id == scheme.id).all()
+    )
+    new_objs = [
+        FundNAVHistory(scheme_id=scheme.id, nav_date=pt.nav_date, nav=pt.nav)
+        for pt in nav_points
+        if pt.nav_date not in existing_dates
+    ]
+    inserted_count = len(new_objs)
+    if new_objs:
+        db.bulk_save_objects(new_objs)
+        db.commit()
 
     cache = MarketDataCache(db)
     cache.record_sync(

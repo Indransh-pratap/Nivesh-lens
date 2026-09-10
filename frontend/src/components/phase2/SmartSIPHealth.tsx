@@ -32,6 +32,7 @@ import {
   Phase2SIPSwitchSimulationResponse,
 } from "@/lib/phase2-api";
 import { cn } from "@/lib/utils";
+import { usePortfolioStore } from "@/store/portfolioStore";
 
 function formatINR(val: number): string {
   return new Intl.NumberFormat("en-IN", {
@@ -42,7 +43,8 @@ function formatINR(val: number): string {
 }
 
 export function SmartSIPHealth() {
-  const [portfolioId, setPortfolioId] = useState<string | null>(null);
+  const { activePortfolioId, loadActivePortfolio } = usePortfolioStore();
+  const [portfolioId, setPortfolioId] = useState<string | null>(activePortfolioId);
   const [data, setData] = useState<Phase2SIPHealthResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,10 +57,19 @@ export function SmartSIPHealth() {
   const [simulationError, setSimulationError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      setPortfolioId(localStorage.getItem("nivesh_active_portfolio_id"));
+    if (activePortfolioId) {
+      setPortfolioId(activePortfolioId);
+      return;
     }
-  }, []);
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("nivesh_active_portfolio_id");
+      if (stored) {
+        setPortfolioId(stored);
+        return;
+      }
+    }
+    loadActivePortfolio().catch(() => {});
+  }, [activePortfolioId, loadActivePortfolio]);
 
   const fetchSIPHealth = async () => {
     if (!portfolioId) return;
@@ -146,6 +157,22 @@ export function SmartSIPHealth() {
       {error && (
         <div className="p-4 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-xs">
           {error}
+        </div>
+      )}
+
+      {/* Loading Skeleton */}
+      {loading && !data && (
+        <div className="space-y-4 animate-pulse">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-24 rounded-2xl bg-card border border-border/60" />
+            ))}
+          </div>
+          <div className="space-y-4">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-40 rounded-2xl bg-card border border-border/60" />
+            ))}
+          </div>
         </div>
       )}
 
@@ -338,10 +365,23 @@ export function SmartSIPHealth() {
 
                     <div className="p-3 rounded-xl bg-secondary/50 border border-border/40">
                       <span className="text-muted-foreground text-[10px] uppercase font-semibold block mb-0.5">
-                        Overlap Risk
+                        Portfolio Overlap
                       </span>
-                      <span className="font-bold text-sm text-foreground">
-                        {item.overlap_score > 30 ? "High Overlap" : "Low Overlap"}
+                      <span
+                        className={cn(
+                          "font-bold text-sm",
+                          item.overlap_score > 40
+                            ? "text-destructive"
+                            : item.overlap_score > 20
+                            ? "text-amber-500"
+                            : "text-emerald-500"
+                        )}
+                      >
+                        {item.overlap_score > 40
+                          ? `High (${item.overlap_score.toFixed(1)}%)`
+                          : item.overlap_score > 20
+                          ? `Moderate (${item.overlap_score.toFixed(1)}%)`
+                          : `Low (${item.overlap_score.toFixed(1)}%)`}
                       </span>
                     </div>
                   </div>
@@ -441,11 +481,15 @@ export function SmartSIPHealth() {
                       </span>
                     </div>
                     <div className="text-right">
-                      <span className="font-bold text-emerald-500 block">
+                      <span className="font-bold text-foreground block">
                         {(c.expense_ratio * 100).toFixed(2)}% TER
                       </span>
-                      <span className="text-[10px] text-muted-foreground">
-                        Est. savings: ~{formatINR(c.estimated_annual_savings)}/yr
+                      <span className={cn("text-[10px]", c.estimated_annual_savings > 0 ? "text-emerald-500 font-semibold" : "text-muted-foreground")}>
+                        {c.estimated_annual_savings > 0
+                          ? `Est. savings: ~${formatINR(c.estimated_annual_savings)}/yr`
+                          : c.expense_ratio_diff < 0
+                          ? `+${(-c.expense_ratio_diff * 100).toFixed(2)}% TER difference`
+                          : "Comparable TER"}
                       </span>
                     </div>
                   </div>

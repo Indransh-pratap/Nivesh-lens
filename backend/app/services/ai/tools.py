@@ -4,6 +4,8 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models.portfolio import Portfolio
+from app.models.holding import AssetType
+from app.models.market_data import FundNAVHistory, FundScheme
 from app.services import portfolio_service
 from app.services.benchmarking.engine import calculate_portfolio_benchmark
 from app.services.diagnostics.service import build_diagnostics
@@ -12,6 +14,7 @@ from app.services.groups.exposure import calculate_group_exposure
 from app.services.phase2.fund_swap import simulate_fund_swap
 from app.services.phase2.stress_test import run_stress_test
 from app.services.sip.health import calculate_sip_health
+from app.services.market_data.seed_data import seed_market_baseline
 
 
 def _ensure_portfolio(portfolio_id: str | uuid.UUID, db: Session) -> Portfolio | None:
@@ -97,6 +100,51 @@ def get_fund_overlap(portfolio_id: str | uuid.UUID, db: Session) -> dict[str, An
     }
 
 
+def get_mutual_fund_context(portfolio_id: str | uuid.UUID, db: Session) -> dict[str, Any]:
+    """Return only the fund facts needed for fund-analysis/recommendation queries."""
+    portfolio = _ensure_portfolio(portfolio_id, db)
+    if not portfolio:
+        return {"error": "Portfolio not found", "available": False}
+    seed_market_baseline(db)
+
+    total = sum((Decimal(str(h.current_value or 0)) for h in portfolio.holdings), Decimal("0"))
+    current: list[dict[str, Any]] = []
+    for holding in portfolio.holdings:
+        raw_type = str(getattr(holding.asset_type, "value", holding.asset_type)).upper()
+        if holding.asset_type != AssetType.MUTUAL_FUND and "MUTUAL" not in raw_type and not (holding.isin or "").upper().startswith("INF"):
+            continue
+        scheme = None
+        if holding.isin:
+            scheme = db.query(FundScheme).filter(FundScheme.isin == holding.isin.strip().upper()).first()
+        if scheme is None and holding.name:
+            scheme = db.query(FundScheme).filter(FundScheme.scheme_name.ilike(f"%{holding.name[:20]}%" )).first()
+        value = Decimal(str(holding.current_value or 0))
+        current.append({
+            "holding_name": holding.name,
+            "isin": holding.isin,
+            "current_value": float(value),
+            "allocation_pct": round(float(value / total * Decimal("100")), 2) if total > 0 else 0.0,
+            "category": scheme.category if scheme else None,
+            "expense_ratio": float(scheme.expense_ratio) if scheme and scheme.expense_ratio is not None else None,
+            "benchmark": scheme.benchmark_id if scheme else None,
+            "scheme_code": scheme.scheme_code if scheme else None,
+        })
+
+    available: list[dict[str, Any]] = []
+    for scheme in db.query(FundScheme).order_by(FundScheme.scheme_name.asc()).limit(50).all():
+        latest_nav = db.query(FundNAVHistory.nav).filter(FundNAVHistory.scheme_id == scheme.id).order_by(FundNAVHistory.nav_date.desc()).first()
+        available.append({
+            "scheme_name": scheme.scheme_name,
+            "scheme_code": scheme.scheme_code,
+            "isin": scheme.isin,
+            "category": scheme.category,
+            "amc_name": scheme.amc_name,
+            "expense_ratio": float(scheme.expense_ratio) if scheme.expense_ratio is not None else None,
+            "latest_nav": float(latest_nav[0]) if latest_nav and latest_nav[0] is not None else None,
+        })
+    return {"current_funds": current, "available_funds": available, "available": True}
+
+
 def get_hhi(portfolio_id: str | uuid.UUID, db: Session) -> dict[str, Any]:
     """Retrieve deterministic Herfindahl-Hirschman Index (0-10,000 scale) and concentration classification."""
     portfolio = _ensure_portfolio(portfolio_id, db)
@@ -112,6 +160,27 @@ def get_hhi(portfolio_id: str | uuid.UUID, db: Session) -> dict[str, Any]:
         "top_contributor": concentration.get("top_contributor"),
         "top_contributor_weight": concentration.get("top_contributor_weight"),
         "effective_constituent_count": concentration.get("effective_constituent_count"),
+        "available": True,
+    }
+
+
+def get_diagnostic_bundle(portfolio_id: str | uuid.UUID, db: Session) -> dict[str, Any]:
+    """Compute the shared diagnostics once for a chat turn.
+
+    Several assistant intents need overlap, health, HHI and exposure. Reusing
+    this bundle avoids rebuilding the same expensive look-through calculation
+    multiple times in one request.
+    """
+    portfolio = _ensure_portfolio(portfolio_id, db)
+    if not portfolio:
+        return {"error": "Portfolio not found", "available": False}
+    diagnostics = build_diagnostics(str(portfolio.id), portfolio.holdings, portfolio.total_value, db=db)
+    return {
+        "overlap": diagnostics.get("fee_analysis", {}).get("overlap_percentage", 0.0),
+        "overlapping_companies": diagnostics.get("fee_analysis", {}).get("overlapping_companies_count", 0),
+        "health": diagnostics.get("diversification_score", {}),
+        "concentration": diagnostics.get("concentration", {}),
+        "top_company_exposures": diagnostics.get("top_company_exposures", []),
         "available": True,
     }
 

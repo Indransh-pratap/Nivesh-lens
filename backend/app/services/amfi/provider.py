@@ -52,11 +52,11 @@ class CanonicalSchemeResolver:
         cleaned = re.sub(r"<[^>]+>", " ", raw_name)
         # 2. Strip Folio: ... patterns from CAS exports
         cleaned = re.sub(r"Folio\s*:\s*[^\s]+", " ", cleaned, flags=re.IGNORECASE)
-        # 3. Strip CAS prefix acronyms like 'MAELC-', 'PPF03 ', 'UTI01 ', 'SBILM-'
-        cleaned = re.sub(r"^\s*[A-Za-z0-9]{2,10}[-\s]+", "", cleaned).strip()
+        # 3. Strip CAS prefix acronyms like 'MAELC-', 'PPFCG-', '128HFCG-', 'PPF03 ', 'UTI01 '
+        cleaned = re.sub(r"^\s*([A-Za-z0-9]{2,10}-|[A-Za-z]{2,5}\d{1,5}\s+)", "", cleaned).strip()
         # 4. Strip plan/option suffixes like '- Direct Plan - Growth', '- Regular Plan', '- Regular - Dividend', etc.
         cleaned = re.sub(
-            r"\s*-\s*(Direct|Regular)(\s+Plan)?(\s*-\s*(Growth|IDCW|Dividend|Bonus|Reinvestment))?.*$",
+            r"\s*-\s*((Direct|Regular)(\s+Plan)?(\s*-\s*(Growth|IDCW|Dividend|Bonus|Reinvestment))?|(Growth|IDCW|Dividend|Bonus|Reinvestment)).*$",
             "",
             cleaned,
             flags=re.IGNORECASE,

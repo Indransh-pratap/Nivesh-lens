@@ -44,15 +44,26 @@ function confidenceLabel(c: string) {
 }
 
 export function CrashSimulator() {
-  const { holdings, whatIfHoldings } = usePortfolioStore();
+  const { holdings, whatIfHoldings, activePortfolioId, loadActivePortfolio } = usePortfolioStore();
 
-  // localStorage-based active portfolio id (mirrors other components)
-  const [portfolioId, setPortfolioId] = useState<string | null>(null);
+  const [portfolioId, setPortfolioId] = useState<string | null>(activePortfolioId);
+
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      setPortfolioId(localStorage.getItem("nivesh_active_portfolio_id"));
+    if (activePortfolioId) {
+      setPortfolioId(activePortfolioId);
+      return;
     }
-  }, []);
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("nivesh_active_portfolio_id");
+      if (stored) {
+        setPortfolioId(stored);
+        return;
+      }
+    }
+    void loadActivePortfolio().then((id) => {
+      if (id) setPortfolioId(id);
+    });
+  }, [activePortfolioId, loadActivePortfolio]);
 
   const [scenarios, setScenarios] = useState<
     Array<{ id: string; name: string; description: string }>
@@ -72,7 +83,12 @@ export function CrashSimulator() {
   );
 
   const load = useCallback(async () => {
-    if (!portfolioId) {
+    let targetId = portfolioId || activePortfolioId;
+    if (!targetId) {
+      targetId = await loadActivePortfolio();
+      if (targetId) setPortfolioId(targetId);
+    }
+    if (!targetId) {
       setIsLoading(false);
       setErrorMessage(
         "No active portfolio. Upload a CAS statement to enable stress testing."
@@ -82,7 +98,7 @@ export function CrashSimulator() {
     setIsLoading(true);
     setErrorMessage(null);
     try {
-      const res = await getPhase2StressTest(portfolioId, selectedScenario);
+      const res = await getPhase2StressTest(targetId, selectedScenario);
       setScenarios(res.available_scenarios);
       setResult(res.result);
     } catch (e: unknown) {
@@ -93,7 +109,7 @@ export function CrashSimulator() {
     } finally {
       setIsLoading(false);
     }
-  }, [portfolioId, selectedScenario]);
+  }, [portfolioId, activePortfolioId, selectedScenario, loadActivePortfolio]);
 
   useEffect(() => {
     void load();

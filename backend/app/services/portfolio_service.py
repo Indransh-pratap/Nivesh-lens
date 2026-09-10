@@ -20,7 +20,6 @@ def list_portfolios(
         select(Portfolio)
         .options(
             selectinload(Portfolio.holdings),
-            selectinload(Portfolio.transactions),
         )
         .where(
             Portfolio.user_id == user_id

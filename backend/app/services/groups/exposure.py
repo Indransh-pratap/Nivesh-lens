@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.models.holding import Holding, AssetType
 from app.models.market_data import Company, CompanyGroup, CompanyGroupMembership, SchemeHolding, FundScheme
+from app.services.amfi.provider import CanonicalSchemeResolver
 from app.services.market_data.seed_data import seed_market_baseline
 
 
@@ -88,13 +89,17 @@ def calculate_group_exposure(
     company_info: dict[str, dict[str, str | None]] = {}
 
     all_groups = db.query(CompanyGroup).all()
+    groups_by_id = {g.id: g for g in all_groups}
     for g in all_groups:
         group_descriptions[g.name] = g.description or ""
 
+    all_companies = db.query(Company).all()
+    companies_by_id = {c.id: c for c in all_companies}
+
     memberships = db.query(CompanyGroupMembership).all()
     for m in memberships:
-        c = db.query(Company).filter(Company.id == m.company_id).first()
-        g = db.query(CompanyGroup).filter(CompanyGroup.id == m.group_id).first()
+        c = companies_by_id.get(m.company_id)
+        g = groups_by_id.get(m.group_id)
         if c and g:
             company_to_group[c.name.lower()] = g.name
             company_info[c.name.lower()] = {"name": c.name, "isin": c.isin, "ticker": c.ticker}
@@ -168,21 +173,11 @@ def calculate_group_exposure(
 
         elif h.asset_type == AssetType.MUTUAL_FUND:
             # Look-through scheme holdings
-            scheme = None
-            if h.isin:
-                scheme = db.query(FundScheme).filter(FundScheme.isin == h.isin).first()
-            if not scheme and h.name:
-                cleaned = re.sub(r"^[A-Za-z0-9]+-", "", h.name).strip()
-                clean_name = re.sub(
-                    r"\s*-\s*(Direct|Regular)?\s*(Plan)?\s*-\s*(Growth|IDCW|Dividend)?.*$",
-                    "",
-                    cleaned,
-                    flags=re.IGNORECASE,
-                ).strip()
-                if len(clean_name) >= 4:
-                    scheme = db.query(FundScheme).filter(FundScheme.scheme_name.ilike(f"%{clean_name}%")).first()
-                if not scheme and len(cleaned) >= 4:
-                    scheme = db.query(FundScheme).filter(FundScheme.scheme_name.ilike(f"%{cleaned[:20]}%")).first()
+            scheme = CanonicalSchemeResolver.resolve_scheme(
+                db,
+                scheme_isin=h.isin,
+                scheme_name=h.name,
+            )
 
             lookthrough_found = False
             if scheme:

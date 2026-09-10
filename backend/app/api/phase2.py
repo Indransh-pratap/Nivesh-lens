@@ -32,6 +32,7 @@ from app.services.phase2.fund_swap import (
 from app.services.phase2.stress_test import SCENARIOS, run_stress_test
 from app.services.benchmarking.engine import calculate_portfolio_benchmark
 from app.services.groups.exposure import calculate_group_exposure
+from app.services.market_data.seed_data import seed_market_baseline
 from app.services.sip.health import calculate_sip_health, simulate_sip_switch
 from app.schemas.phase2 import (
     BenchmarkResponse,
@@ -85,6 +86,7 @@ def get_phase2_stress_test(
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
 ) -> dict:
+    seed_market_baseline(db)
     portfolio = _get_portfolio(db, user_id, portfolio_id)
     return {
         "available_scenarios": [
@@ -110,6 +112,7 @@ def post_phase2_stress_test(
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
 ) -> dict:
+    seed_market_baseline(db)
     portfolio = _get_portfolio(db, user_id, portfolio_id)
     return run_stress_test(db, portfolio.holdings, payload.scenario_id)
 

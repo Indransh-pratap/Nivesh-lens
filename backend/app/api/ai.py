@@ -1,7 +1,7 @@
 import uuid
 from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user_id
@@ -63,6 +63,7 @@ def _get_owned_portfolio(portfolio_id: uuid.UUID, user_id: str, db: Session) -> 
 
 class ChatQueryRequest(BaseModel):
     question: str
+    conversation: list[dict[str, str]] = Field(default_factory=list)
 
 
 class FundSwapExplainRequest(BaseModel):
@@ -99,7 +100,7 @@ def post_ask_my_portfolio(
 ) -> PortfolioAnswer:
     """Natural-language portfolio Q&A powered by deterministic read-only tools and Gemini."""
     _get_owned_portfolio(portfolio_id, user_id, db)
-    return ask_portfolio.ask_my_portfolio(portfolio_id, payload.question, db)
+    return ask_portfolio.ask_my_portfolio(portfolio_id, payload.question, db, conversation=payload.conversation)
 
 
 # ============================================================================

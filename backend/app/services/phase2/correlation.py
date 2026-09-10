@@ -11,16 +11,22 @@ Methodology:
 from __future__ import annotations
 
 import math
+import logging
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Iterable
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.holding import AssetType, Holding
 from app.models.market_data import FundScheme, FundNAVHistory
+from app.services.amfi.provider import CanonicalSchemeResolver
+from app.services.market_data.seed_data import seed_market_baseline
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -115,19 +121,11 @@ def _fetch_fund_series(
     lookback_days: int,
     as_of: date,
 ) -> FundSeries:
-    scheme = None
-    if holding.isin:
-        scheme = (
-            db.query(FundScheme)
-            .filter(FundScheme.isin == holding.isin.strip().upper())
-            .first()
-        )
-    if scheme is None and holding.name:
-        scheme = (
-            db.query(FundScheme)
-            .filter(FundScheme.scheme_name.ilike(f"%{holding.name[:15]}%"))
-            .first()
-        )
+    scheme = CanonicalSchemeResolver.resolve_scheme(
+        db,
+        scheme_isin=holding.isin,
+        scheme_name=holding.name,
+    )
 
     if scheme is None:
         return FundSeries(
@@ -196,20 +194,31 @@ def calculate_nav_correlation_matrix(
         db: DB session
         holdings: list of Holding objects
         lookback: one of "3M" / "6M" / "1Y" / "3Y"
-        as_of: reference date (defaults to today)
+        as_of: reference date (defaults to today or latest NAV date)
 
     Returns:
         dict with funds, matrix, pairs, thresholds, lookback, insufficient_funds
     """
+    # Ensure market baseline schemes and NAVs are seeded
+    seed_market_baseline(db)
+
     lookback_days = LOOKBACK_WINDOWS.get(lookback)
     if lookback_days is None:
         lookback_days = LOOKBACK_WINDOWS["1Y"]
         lookback = "1Y"
 
     if as_of is None:
-        as_of = date.today()
+        max_nav_date = db.query(func.max(FundNAVHistory.nav_date)).scalar()
+        as_of = max_nav_date or date.today()
 
-    mf_holdings = [h for h in holdings if h.asset_type == AssetType.MUTUAL_FUND]
+    holdings_list = list(holdings)
+    mf_holdings = [
+        h for h in holdings_list
+        if h.asset_type == AssetType.MUTUAL_FUND
+        or (h.isin and h.isin.strip().upper().startswith("INF"))
+        or "FUND" in (h.name or "").upper()
+        or "MUTUAL" in str(getattr(h.asset_type, "value", h.asset_type)).upper()
+    ]
 
     series_list: list[FundSeries] = []
     for h in mf_holdings:
@@ -231,6 +240,12 @@ def calculate_nav_correlation_matrix(
     n = len(sufficient_series)
 
     if n < 2:
+        logger.info(
+            "Correlation unavailable: lookback=%s eligible_funds=%d insufficient=%d",
+            lookback,
+            n,
+            len(insufficient),
+        )
         return {
             "lookback": lookback,
             "as_of": as_of.isoformat(),
@@ -254,6 +269,13 @@ def calculate_nav_correlation_matrix(
     sorted_dates = sorted(common_dates)
 
     if len(sorted_dates) < MIN_OBSERVATIONS:
+        logger.info(
+            "Correlation unavailable: lookback=%s funds=%d common_observations=%d required=%d",
+            lookback,
+            n,
+            len(sorted_dates),
+            MIN_OBSERVATIONS,
+        )
         return {
             "lookback": lookback,
             "as_of": as_of.isoformat(),

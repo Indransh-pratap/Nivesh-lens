@@ -25,9 +25,21 @@ class PortfolioExplanation(BaseModel):
 class PortfolioAnswer(BaseModel):
     question: str = Field(..., description="Original user natural-language query")
     answer: str = Field(..., description="Truthful, grounded answer synthesized from tool results")
+    intent: str = Field(default="GENERAL_FINANCE")
+    summary: str = Field(default="")
+    reasoning: list[str] = Field(default_factory=list)
+    portfolio_insights: list[str] = Field(default_factory=list)
+    recommendations: list[dict[str, Any]] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
     supporting_facts: list[str] = Field(default_factory=list, description="Key deterministic facts used to answer")
     tools_consulted: list[str] = Field(default_factory=list, description="List of read-only tools invoked")
+    web_sources: list[dict[str, str | None]] = Field(
+        default_factory=list,
+        description="Source links used for time-sensitive external context",
+    )
+    sources: list[dict[str, str | None]] = Field(default_factory=list)
     confidence: float = Field(default=1.0, ge=0.0, le=1.0, description="Confidence in the factual grounding")
+    confidence_level: Literal["high", "medium", "low"] = "medium"
     disclaimer: str = Field(
         default="AI portfolio response grounded strictly in verified backend metrics.",
         description="Compliance disclaimer",

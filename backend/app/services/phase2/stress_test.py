@@ -12,12 +12,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
+import logging
 from typing import Iterable
 
 from sqlalchemy.orm import Session
 
 from app.models.holding import AssetType, Holding
 from app.models.market_data import BenchmarkPrice, FundScheme, FundNAVHistory
+from app.services.amfi.provider import CanonicalSchemeResolver
+from app.services.market_data.seed_data import seed_market_baseline
+
+logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -213,17 +218,31 @@ def run_stress_test(
     db: Session,
     holdings: Iterable[Holding],
     scenario_id: str,
+    auto_seed: bool = False,
 ) -> dict:
     """Runs historical crash stress test at the holding level.
 
     Returns a JSON-serializable dict with portfolio-level and per-holding impact.
     """
     scenario = SCENARIOS.get(scenario_id) or SCENARIOS["COVID_2020"]
+    logger.info("Running stress test for scenario %s", scenario.id)
+
+    # Ensure baseline market benchmark & scheme data is seeded if requested
+    if auto_seed:
+        seed_market_baseline(db)
 
     holdings_list = list(holdings)
     total_value = sum((Decimal(str(h.current_value)) for h in holdings_list), Decimal("0"))
 
     bench_return, bench_conf = _benchmark_return(db, scenario)
+    if bench_return is None:
+        logger.warning(
+            "Stress test benchmark unavailable: scenario=%s benchmark=%s window=%s..%s",
+            scenario.id,
+            scenario.benchmark_id,
+            scenario.start_date,
+            scenario.end_date,
+        )
     stock_beta = STOCK_BETA.get(scenario.id, 1.0)
 
     impacts: list[HoldingImpact] = []
@@ -237,18 +256,36 @@ def run_stress_test(
     for h in holdings_list:
         value = Decimal(str(h.current_value))
         if value <= 0:
+            logger.warning("Skipping non-positive holding in stress test: id=%s name=%s value=%s", h.id, h.name, value)
             continue
 
-        # Default: no impact
+        isin_clean = (h.isin or "").strip().upper()
+        raw_type = str(h.asset_type.value if hasattr(h.asset_type, "value") else h.asset_type).upper()
+        name_upper = (h.name or "").upper()
+
+        is_stock = (
+            h.asset_type in (AssetType.STOCK, AssetType.ETF)
+            or isin_clean.startswith("INE")
+            or "EQUITY" in raw_type
+            or "SHARE" in raw_type
+        )
+        is_mf = (
+            h.asset_type == AssetType.MUTUAL_FUND
+            or isin_clean.startswith("INF")
+            or "MUTUAL" in raw_type
+            or "FUND" in name_upper
+        )
+
         return_pct = 0.0
         confidence = "ESTIMATED"
         methodology = "No scenario impact for this asset class."
 
-        if h.asset_type in (AssetType.STOCK, AssetType.ETF):
+        if is_stock and not is_mf:
             if bench_return is None:
                 confidence = "UNAVAILABLE"
                 methodology = "Benchmark price data missing for this scenario."
                 missing_assets.append(h.name)
+                used_unavailable += 1
             else:
                 return_pct = bench_return * stock_beta
                 confidence = "ESTIMATED"
@@ -257,55 +294,69 @@ def run_stress_test(
                     f"scaled by {stock_beta:.2f}x stock beta. "
                     f"Per-stock history not available."
                 )
-            covered_value += value
-            simulated_loss += value * Decimal(str(-return_pct)) if return_pct < 0 else Decimal("0")
-            used_estimates += 1 if confidence == "ESTIMATED" else 0
-            used_unavailable += 1 if confidence == "UNAVAILABLE" else 0
+                covered_value += value
+                simulated_loss += value * Decimal(str(-return_pct)) if return_pct < 0 else Decimal("0")
+                used_estimates += 1
 
-        elif h.asset_type == AssetType.MUTUAL_FUND:
-            scheme = None
-            if h.isin:
-                scheme = (
-                    db.query(FundScheme)
-                    .filter(FundScheme.isin == h.isin.strip().upper())
-                    .first()
-                )
+        elif is_mf:
+            scheme = CanonicalSchemeResolver.resolve_scheme(
+                db,
+                scheme_isin=h.isin,
+                scheme_name=h.name,
+            )
             actual_return, conf = _mf_impact_from_nav(db, h, scheme, scenario)
+
             if conf == "ACTUAL_NAV" and actual_return is not None:
                 return_pct = actual_return
-                methodology = f"Historical NAV available for {scheme.scheme_name} over scenario window."
+                methodology = f"Historical NAV available for {scheme.scheme_name if scheme else h.name} over scenario window."
                 confidence = "ACTUAL_NAV"
                 used_actuals += 1
-            elif conf == "ESTIMATED" and bench_return is not None:
-                multiplier = _category_multiplier(scheme.category if scheme else None)
+                covered_value += value
+                simulated_loss += value * Decimal(str(-return_pct)) if return_pct < 0 else Decimal("0")
+            elif bench_return is not None:
+                category = scheme.category if (scheme and scheme.category) else None
+                if not category and h.name:
+                    name_lower = h.name.lower()
+                    if "small" in name_lower:
+                        category = "Small Cap"
+                    elif "mid" in name_lower:
+                        category = "Mid Cap"
+                    elif "flexi" in name_lower or "multi" in name_lower:
+                        category = "Flexi Cap"
+                    elif "large" in name_lower or "bluechip" in name_lower or "nifty" in name_lower or "index" in name_lower:
+                        category = "Large Cap"
+                    elif "debt" in name_lower or "bond" in name_lower or "liquid" in name_lower or "gilt" in name_lower:
+                        category = "Debt"
+
+                multiplier = _category_multiplier(category)
                 return_pct = bench_return * multiplier
                 methodology = (
                     f"Proxy: NIFTY 50 scenario return ({bench_return * 100:.1f}%) "
                     f"scaled by {multiplier:.2f}x for category "
-                    f"'{scheme.category if scheme and scheme.category else 'Unknown'}'. "
+                    f"'{category or 'General Equity'}'. "
                     f"Exact fund NAV history not available for this period."
                 )
                 confidence = "ESTIMATED"
                 used_estimates += 1
+                covered_value += value
+                simulated_loss += value * Decimal(str(-return_pct)) if return_pct < 0 else Decimal("0")
             else:
                 confidence = "UNAVAILABLE"
                 methodology = "No benchmark data and no fund NAV history."
                 missing_assets.append(h.name)
                 used_unavailable += 1
 
-            covered_value += value
-            simulated_loss += value * Decimal(str(-return_pct)) if return_pct < 0 else Decimal("0")
-
         elif h.asset_type in (AssetType.CASH, AssetType.BOND):
             return_pct = 0.0
             confidence = "ACTUAL_NAV"
             methodology = "Cash/debt holdings are not affected by equity crash scenarios."
             covered_value += value
+            used_actuals += 1
 
         else:
             return_pct = 0.0
             confidence = "UNAVAILABLE"
-            methodology = f"Asset class '{h.asset_type.value}' not supported by this scenario."
+            methodology = f"Asset class '{h.asset_type.value if hasattr(h.asset_type, 'value') else h.asset_type}' not supported by this scenario."
             missing_assets.append(h.name)
             used_unavailable += 1
 

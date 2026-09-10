@@ -26,8 +26,9 @@ function shortName(name: string) {
 }
 
 export function CorrelationHeatmap() {
-  const { holdings } = usePortfolioStore();
-  const [portfolioId, setPortfolioId] = useState<string | null>(null);
+  const { holdings, activePortfolioId, loadActivePortfolio } = usePortfolioStore();
+
+  const [portfolioId, setPortfolioId] = useState<string | null>(activePortfolioId);
   const [lookback, setLookback] = useState<Lookback>("1Y");
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -42,10 +43,21 @@ export function CorrelationHeatmap() {
   ]);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      setPortfolioId(localStorage.getItem("nivesh_active_portfolio_id"));
+    if (activePortfolioId) {
+      setPortfolioId(activePortfolioId);
+      return;
     }
-  }, []);
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("nivesh_active_portfolio_id");
+      if (stored) {
+        setPortfolioId(stored);
+        return;
+      }
+    }
+    void loadActivePortfolio().then((id) => {
+      if (id) setPortfolioId(id);
+    });
+  }, [activePortfolioId, loadActivePortfolio]);
 
   const mfHoldingsCount = useMemo(
     () =>
@@ -59,15 +71,20 @@ export function CorrelationHeatmap() {
   );
 
   const load = useCallback(async () => {
-    if (!portfolioId) {
+    let targetId = portfolioId || activePortfolioId;
+    if (!targetId) {
+      targetId = await loadActivePortfolio();
+      if (targetId) setPortfolioId(targetId);
+    }
+    if (!targetId) {
       setIsLoading(false);
-      setErrorMessage("No active portfolio.");
+      setErrorMessage("No active portfolio. Please connect a portfolio with mutual funds.");
       return;
     }
     setIsLoading(true);
     setErrorMessage(null);
     try {
-      const res = await getPhase2Correlation(portfolioId, lookback);
+      const res = await getPhase2Correlation(targetId, lookback);
       setAvailableLookbacks(res.available_lookbacks);
       setResult(res.result);
     } catch (e: unknown) {
@@ -78,7 +95,7 @@ export function CorrelationHeatmap() {
     } finally {
       setIsLoading(false);
     }
-  }, [portfolioId, lookback]);
+  }, [portfolioId, activePortfolioId, lookback, loadActivePortfolio]);
 
   useEffect(() => {
     void load();

@@ -91,7 +91,12 @@ def calculate_effective_company_exposure(
         # ---------------------------------------------------------
         # DIRECT STOCK
         # ---------------------------------------------------------
-        if holding.asset_type == AssetType.STOCK:
+        raw_asset_type = str(
+            getattr(holding.asset_type, "value", holding.asset_type)
+        ).upper()
+        # ETFs are equity instruments too; imported CAS records can also
+        # arrive as enum-like strings, so do not rely on identity comparison.
+        if holding.asset_type in (AssetType.STOCK, AssetType.ETF) or raw_asset_type in {"STOCK", "ETF"}:
             key = _company_key(
                 holding.isin,
                 holding.name,
@@ -106,7 +111,7 @@ def calculate_effective_company_exposure(
         # ---------------------------------------------------------
         # MUTUAL FUND LOOK-THROUGH
         # ---------------------------------------------------------
-        if holding.asset_type == AssetType.MUTUAL_FUND:
+        if holding.asset_type == AssetType.MUTUAL_FUND or raw_asset_type in {"MUTUAL_FUND", "MUTUAL FUND"}:
             mf_present = True
 
             scheme = None

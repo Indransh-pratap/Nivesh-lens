@@ -16,21 +16,19 @@ from app.models.market_data import (
 
 logger = logging.getLogger(__name__)
 
-_seeded_market_data = False
-
-
 def seed_market_baseline(db: Session) -> None:
     """
     Seeds baseline benchmarks, company conglomerate groups, popular mutual fund schemes,
     historical benchmark prices (covering 2008, 2020, 2022 scenarios), and look-through scheme holdings.
     """
-    global _seeded_market_data
-    if _seeded_market_data:
-        return
-
-    # Fast check: if market data already seeded in DB, skip completely
-    if db.query(FundScheme).first() is not None and db.query(CompanyGroup).first() is not None:
-        _seeded_market_data = True
+    # Fast check: if market baseline data already seeded with 3Y+ NAV history in this DB session, skip
+    three_yr_ago = date.today() - timedelta(days=1000)
+    if (
+        db.query(FundScheme).filter(FundScheme.scheme_code == "120716").first() is not None
+        and db.query(CompanyGroup).first() is not None
+        and db.query(BenchmarkPrice).first() is not None
+        and db.query(FundNAVHistory).filter(FundNAVHistory.nav_date <= three_yr_ago).count() >= 10
+    ):
         return
     # 1. Seed Benchmarks
     benchmarks_data = [
@@ -95,11 +93,17 @@ def seed_market_baseline(db: Session) -> None:
         dates_and_prices.append(("NIFTY_500", curr, (val * Decimal("0.8")).quantize(Decimal("0.01"))))
         curr += timedelta(days=3)
 
-    for bm_id, p_date, val in dates_and_prices:
-        exists = db.query(BenchmarkPrice).filter(BenchmarkPrice.benchmark_id == bm_id, BenchmarkPrice.price_date == p_date).first()
-        if not exists:
-            db.add(BenchmarkPrice(benchmark_id=bm_id, price_date=p_date, value=val))
-    db.commit()
+    existing_bps = set(
+        db.query(BenchmarkPrice.benchmark_id, BenchmarkPrice.price_date).all()
+    )
+    new_bps = [
+        BenchmarkPrice(benchmark_id=bm_id, price_date=p_date, value=val)
+        for bm_id, p_date, val in dates_and_prices
+        if (bm_id, p_date) not in existing_bps
+    ]
+    if new_bps:
+        db.bulk_save_objects(new_bps)
+        db.commit()
 
     # 2. Seed Conglomerate Groups & Companies
     groups_def = [
@@ -169,13 +173,16 @@ def seed_market_baseline(db: Session) -> None:
         ("Sun Pharmaceutical", "INE044A01036", "SUNPHARMA", "Pharma", None),
     ]
 
+    existing_companies = {c.name: c for c in db.query(Company).all()}
     for c_name, isin, ticker, sector, g_name in companies_def:
-        c = db.query(Company).filter(Company.name == c_name).first()
-        if not c:
+        if c_name not in existing_companies:
             c = Company(name=c_name, isin=isin, ticker=ticker, sector=sector)
             db.add(c)
             db.commit()
             db.refresh(c)
+            existing_companies[c_name] = c
+        else:
+            c = existing_companies[c_name]
         if g_name and g_name in group_map:
             grp = group_map[g_name]
             m = db.query(CompanyGroupMembership).filter(CompanyGroupMembership.company_id == c.id).first()
@@ -191,11 +198,23 @@ def seed_market_baseline(db: Session) -> None:
         ("120503", "Axis Small Cap Fund - Direct Plan - Growth", "INF846K01EW2", "Axis Mutual Fund", "Small Cap", Decimal("0.0052"), "NIFTY_500"),
         ("118834", "Mirae Asset Large Cap Fund - Direct Plan - Growth", "INF769K01169", "Mirae Asset Mutual Fund", "Large Cap", Decimal("0.0054"), "NIFTY_50"),
         ("119775", "Nippon India Small Cap Fund - Direct Plan - Growth", "INF204KB1882", "Nippon India Mutual Fund", "Small Cap", Decimal("0.0068"), "NIFTY_500"),
+        # Popular CAS imported schemes
+        ("120716", "UTI Nifty 50 Index Fund - Direct - Growth", "INF209K01VD8", "UTI Mutual Fund", "Index Fund", Decimal("0.0020"), "NIFTY_50"),
+        ("120166", "Kotak Emerging Equity Fund - Direct - Growth", "INF204K01MK4", "Kotak Mahindra Mutual Fund", "Mid Cap", Decimal("0.0048"), "NIFTY_500"),
+        ("122639", "Parag Parikh Flexi Cap Fund - Direct - Growth", "INF082J01029", "PPFAS Mutual Fund", "Flexi Cap", Decimal("0.0055"), "NIFTY_500"),
+        ("118989", "HDFC Flexi Cap Fund - Direct Plan - Growth", "INF179K01VY8", "HDFC Mutual Fund", "Flexi Cap", Decimal("0.0078"), "NIFTY_500"),
+        ("118955", "HDFC Balanced Advantage Fund - Direct Plan - Growth", "INF179K01XQ2", "HDFC Mutual Fund", "Hybrid", Decimal("0.0072"), "NIFTY_50"),
+        ("120586", "ICICI Prudential Bluechip Fund - Direct Plan - Growth", "INF109K01VQ1", "ICICI Prudential Mutual Fund", "Large Cap", Decimal("0.0090"), "NIFTY_50"),
+        ("120594", "ICICI Prudential Technology Fund - Direct Plan - Growth", "INF109K01XG8", "ICICI Prudential Mutual Fund", "Sectoral", Decimal("0.0095"), "NIFTY_500"),
+        ("119607", "SBI Contra Fund - Direct Plan - Growth", "INF200K01VB0", "SBI Mutual Fund", "Contra", Decimal("0.0064"), "NIFTY_500"),
+        ("120505", "Axis Flexi Cap Fund - Direct - Growth", "INF247L01AA5", "Axis Mutual Fund", "Flexi Cap", Decimal("0.0058"), "NIFTY_500"),
     ]
 
     scheme_map = {}
     for code, name, isin, amc, cat, exp, bm in schemes_def:
         s = db.query(FundScheme).filter(FundScheme.scheme_code == code).first()
+        if not s and isin:
+            s = db.query(FundScheme).filter(FundScheme.isin == isin).first()
         if not s:
             s = FundScheme(scheme_code=code, scheme_name=name, isin=isin, amc_name=amc, category=cat, expense_ratio=exp, benchmark_id=bm)
             db.add(s)
@@ -203,24 +222,64 @@ def seed_market_baseline(db: Session) -> None:
             db.refresh(s)
         scheme_map[code] = s
 
-    # Seed NAV history for correlation and swap analysis over past 30 days
+    # Seed NAV history for correlation, returns, and swap analysis over past ~4 years (~1,100 trading days)
     today = date.today()
     for code, s in scheme_map.items():
-        base_nav = Decimal("45.00") if code == "100033" else Decimal("85.00") if code == "102594" else Decimal("60.00")
-        for d_offset in range(40, -1, -1):
-            d = today - timedelta(days=d_offset)
-            # Simulated daily NAV walk
-            mult = Decimal("1.0") + Decimal(str((d_offset % 7 - 3) * 0.004))
-            nav_val = (base_nav * mult).quantize(Decimal("0.0001"))
-            exists = db.query(FundNAVHistory).filter(FundNAVHistory.scheme_id == s.id, FundNAVHistory.nav_date == d).first()
-            if not exists:
-                db.add(FundNAVHistory(scheme_id=s.id, nav_date=d, nav=nav_val))
+        base_nav = (
+            Decimal("45.00") if "Flexi" in s.scheme_name
+            else Decimal("185.00") if "Index" in s.scheme_name or "Nifty" in s.scheme_name
+            else Decimal("85.00") if "Large" in s.scheme_name or "Top" in s.scheme_name
+            else Decimal("128.00") if "Emerging" in s.scheme_name
+            else Decimal("110.00") if "Small" in s.scheme_name
+            else Decimal("75.00")
+        )
+        existing_dates = set(
+            p[0] for p in db.query(FundNAVHistory.nav_date).filter(FundNAVHistory.scheme_id == s.id).all()
+        )
+        oldest_existing = min(existing_dates) if existing_dates else None
+        # If no history or history does not cover at least 3 years, seed extended historical window
+        if not oldest_existing or oldest_existing > today - timedelta(days=1000):
+            nav_objects = []
+            code_hash = sum(ord(c) for c in code)
+            annual_rate = (
+                0.20 if "Emerging" in s.scheme_name or "Mid" in s.scheme_name
+                else 0.22 if "Small" in s.scheme_name
+                else 0.16 if "Flexi" in s.scheme_name
+                else 0.13 if "Index" in s.scheme_name or "Nifty" in s.scheme_name or "Bluechip" in s.scheme_name or "Top" in s.scheme_name
+                else 0.11 if "Balanced" in s.scheme_name or "Hybrid" in s.scheme_name
+                else 0.14
+            )
+            total_days = 1500  # ~4.1 years
+            for d_offset in range(total_days, -1, -1):
+                d = today - timedelta(days=d_offset)
+                if d.weekday() >= 5 or d in existing_dates:  # skip weekends & already existing dates
+                    continue
+                # Compounded historical discount curve back from today
+                cum_discount = (1.0 + annual_rate) ** (-d_offset / 365.25)
+                # Deterministic market oscillation
+                noise = 1.0 + (((d_offset * 7 + code_hash) % 101 - 50) / 1000.0) * 0.02
+                nav_val = (base_nav * Decimal(str(round(cum_discount * noise, 4)))).quantize(Decimal("0.0001"))
+                nav_objects.append(FundNAVHistory(scheme_id=s.id, nav_date=d, nav=nav_val))
+            if nav_objects:
+                db.bulk_save_objects(nav_objects)
     db.commit()
 
     # Seed Look-through Holdings Disclosures for Schemes
     as_of = date(today.year, today.month, 1)
     holdings_data = {
         "100033": [
+            ("HDFC Bank", "INE040A01034", "Banking", Decimal("8.20")),
+            ("ICICI Bank", "INE090A01021", "Banking", Decimal("7.50")),
+            ("Tata Consultancy Services", "INE467B01029", "IT", Decimal("6.10")),
+            ("Reliance Industries", "INE002A01018", "Oil & Gas", Decimal("5.80")),
+            ("Axis Bank", "INE238A01034", "Banking", Decimal("4.30")),
+            ("ITC Limited", "INE154A01025", "FMCG", Decimal("4.10")),
+            ("Larsen & Toubro", "INE018A01030", "Engineering", Decimal("3.90")),
+            ("Tata Motors", "INE155A01022", "Automobile", Decimal("3.50")),
+            ("Bajaj Finance", "INE296A01024", "NBFC", Decimal("3.20")),
+            ("Infosys", "INE009A01021", "IT", Decimal("3.00")),
+        ],
+        "122639": [
             ("HDFC Bank", "INE040A01034", "Banking", Decimal("8.20")),
             ("ICICI Bank", "INE090A01021", "Banking", Decimal("7.50")),
             ("Tata Consultancy Services", "INE467B01029", "IT", Decimal("6.10")),
@@ -264,6 +323,57 @@ def seed_market_baseline(db: Session) -> None:
             ("Bharti Airtel", "INE397D01024", "Telecom", Decimal("3.40")),
             ("State Bank of India", "INE062A01020", "Banking", Decimal("3.10")),
             ("ITC Limited", "INE154A01025", "FMCG", Decimal("2.80")),
+        ],
+        "120716": [
+            ("HDFC Bank", "INE040A01034", "Banking", Decimal("11.50")),
+            ("Reliance Industries", "INE002A01018", "Oil & Gas", Decimal("9.80")),
+            ("ICICI Bank", "INE090A01021", "Banking", Decimal("7.90")),
+            ("Infosys", "INE009A01021", "IT", Decimal("6.20")),
+            ("Tata Consultancy Services", "INE467B01029", "IT", Decimal("4.10")),
+            ("ITC Limited", "INE154A01025", "FMCG", Decimal("3.80")),
+            ("Larsen & Toubro", "INE018A01030", "Engineering", Decimal("3.60")),
+            ("Axis Bank", "INE238A01034", "Banking", Decimal("3.20")),
+        ],
+        "120166": [
+            ("Supreme Industries", "INE423A01024", "Plastics", Decimal("4.20")),
+            ("Persistent Systems", "INE262H01013", "IT", Decimal("3.90")),
+            ("Schaeffler India", "INE513A01022", "Auto Components", Decimal("3.50")),
+            ("Cummins India", "INE299A01018", "Engineering", Decimal("3.40")),
+            ("Solar Industries", "INE343H01029", "Chemicals", Decimal("3.10")),
+        ],
+        "118989": [
+            ("ICICI Bank", "INE090A01021", "Banking", Decimal("8.80")),
+            ("HDFC Bank", "INE040A01034", "Banking", Decimal("8.20")),
+            ("Cipla", "INE059A01026", "Pharma", Decimal("5.50")),
+            ("HCL Technologies", "INE860A01027", "IT", Decimal("4.80")),
+            ("State Bank of India", "INE062A01020", "Banking", Decimal("4.50")),
+            ("Reliance Industries", "INE002A01018", "Oil & Gas", Decimal("4.10")),
+        ],
+        "118955": [
+            ("HDFC Bank", "INE040A01034", "Banking", Decimal("7.20")),
+            ("ICICI Bank", "INE090A01021", "Banking", Decimal("6.50")),
+            ("ITC Limited", "INE154A01025", "FMCG", Decimal("4.20")),
+            ("Coal India", "INE522F01014", "Mining", Decimal("3.80")),
+            ("Reliance Industries", "INE002A01018", "Oil & Gas", Decimal("3.50")),
+        ],
+        "119607": [
+            ("State Bank of India", "INE062A01020", "Banking", Decimal("4.50")),
+            ("GAIL India", "INE129A01019", "Oil & Gas", Decimal("3.80")),
+            ("Cognizant", "INE009A01021", "IT", Decimal("3.20")),
+            ("HDFC Bank", "INE040A01034", "Banking", Decimal("3.00")),
+        ],
+        "120586": [
+            ("ICICI Bank", "INE090A01021", "Banking", Decimal("9.80")),
+            ("Reliance Industries", "INE002A01018", "Oil & Gas", Decimal("8.90")),
+            ("HDFC Bank", "INE040A01034", "Banking", Decimal("8.10")),
+            ("Infosys", "INE009A01021", "IT", Decimal("6.50")),
+            ("Larsen & Toubro", "INE018A01030", "Engineering", Decimal("5.20")),
+        ],
+        "120503": [
+            ("Galaxy Surfactants", "INE600K01018", "Chemicals", Decimal("4.10")),
+            ("Krishna Institute", "INE278Y01012", "Healthcare", Decimal("3.80")),
+            ("Narayana Hrudayalaya", "INE410P01024", "Healthcare", Decimal("3.50")),
+            ("Brigade Enterprises", "INE791I01019", "Real Estate", Decimal("3.20")),
         ],
     }
 

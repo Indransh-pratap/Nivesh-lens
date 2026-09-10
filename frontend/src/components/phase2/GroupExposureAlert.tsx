@@ -19,6 +19,7 @@ import {
   Phase2GroupExposureResponse,
 } from "@/lib/phase2-api";
 import { cn } from "@/lib/utils";
+import { usePortfolioStore } from "@/store/portfolioStore";
 
 function formatINR(val: number): string {
   return new Intl.NumberFormat("en-IN", {
@@ -29,7 +30,8 @@ function formatINR(val: number): string {
 }
 
 export function GroupExposureAlert() {
-  const [portfolioId, setPortfolioId] = useState<string | null>(null);
+  const { activePortfolioId, loadActivePortfolio } = usePortfolioStore();
+  const [portfolioId, setPortfolioId] = useState<string | null>(activePortfolioId);
   const [data, setData] = useState<Phase2GroupExposureResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -39,17 +41,34 @@ export function GroupExposureAlert() {
   const [thresholdHigh, setThresholdHigh] = useState(25.0);
 
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      setPortfolioId(localStorage.getItem("nivesh_active_portfolio_id"));
+    if (activePortfolioId) {
+      setPortfolioId(activePortfolioId);
+      return;
     }
-  }, []);
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("nivesh_active_portfolio_id");
+      if (stored) {
+        setPortfolioId(stored);
+        return;
+      }
+    }
+    void loadActivePortfolio().then((id) => {
+      if (id) setPortfolioId(id);
+    });
+  }, [activePortfolioId, loadActivePortfolio]);
 
   const fetchGroupExposure = async () => {
-    if (!portfolioId) return;
+    let targetId = portfolioId || activePortfolioId;
+    if (!targetId) {
+      targetId = await loadActivePortfolio();
+      if (targetId) setPortfolioId(targetId);
+    }
+    if (!targetId) return;
+
     setLoading(true);
     setError(null);
     try {
-      const res = await getPhase2GroupExposure(portfolioId, thresholdModerate, thresholdHigh);
+      const res = await getPhase2GroupExposure(targetId, thresholdModerate, thresholdHigh);
       setData(res);
     } catch (err: any) {
       setError(err?.message || "Failed to load conglomerate exposure data");
@@ -60,7 +79,7 @@ export function GroupExposureAlert() {
 
   useEffect(() => {
     fetchGroupExposure();
-  }, [portfolioId, thresholdModerate, thresholdHigh]);
+  }, [portfolioId, activePortfolioId, thresholdModerate, thresholdHigh]);
 
   const toggleGroup = (groupName: string) => {
     setExpandedGroups((prev) => ({

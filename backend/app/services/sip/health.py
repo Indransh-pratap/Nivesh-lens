@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 
 from app.models.holding import Holding, AssetType
 from app.models.transaction import Transaction, TransactionType
-from app.models.market_data import FundScheme, FundNAVHistory
+from app.models.market_data import FundScheme, FundNAVHistory, SchemeHolding
+from app.services.market_data.seed_data import seed_market_baseline
 
 
 def _score_to_grade(score: int) -> tuple[str, str]:
@@ -28,6 +29,8 @@ def _detect_sip_status_and_cadence(
     """
     Analyzes transaction patterns to detect status (ACTIVE, PAUSED, STOPPED, UNKNOWN),
     monthly investment amount, and tenure in months.
+    If no ledger transactions exist, dynamically estimates monthly investment amount
+    and tenure proportional to the holding valuation and standard Indian SIP denominations.
     """
     holding_txs = [
         t for t in transactions
@@ -67,9 +70,18 @@ def _detect_sip_status_and_cadence(
 
         return status, round(monthly_amount, 2), tenure_months
 
-    # Fallback when only holdings snapshot exists (e.g. from CAS)
-    monthly_est = float(holding.invested_value / Decimal("12")) if holding.invested_value and holding.invested_value > Decimal("0") else 5000.0
-    return "ACTIVE", round(monthly_est, 2), 12
+    # Dynamic estimation when only holdings snapshot exists (e.g. from CAS import)
+    val = float(holding.invested_value) if holding.invested_value and holding.invested_value > Decimal("0") else float(holding.current_value or 0)
+    if val <= 0:
+        return "ACTIVE", 2500.0, 12
+
+    # Standard Indian SIP bracket denominations (₹500 to ₹25,000)
+    sip_brackets = [500, 1000, 1500, 2000, 2500, 3000, 4000, 5000, 6000, 7500, 8000, 10000, 12500, 15000, 20000, 25000]
+    rough_monthly = val / 14.0
+    monthly_est = min(sip_brackets, key=lambda b: abs(b - rough_monthly))
+    tenure_est = max(6, min(48, int(round(val / monthly_est))))
+
+    return "ACTIVE", float(monthly_est), tenure_est
 
 
 def _resolve_scheme(db: Session, holding: Holding) -> FundScheme | None:
@@ -84,6 +96,9 @@ def _resolve_scheme(db: Session, holding: Holding) -> FundScheme | None:
             cleaned,
             flags=re.IGNORECASE,
         ).strip()
+        clean_name = re.sub(r"^\s*<br\s*/?>\s*", "", clean_name, flags=re.IGNORECASE).strip()
+        clean_name = re.sub(r"^[A-Z0-9]{2,6}\s+", "", clean_name).strip()
+
         if len(clean_name) >= 4:
             scheme = db.query(FundScheme).filter(FundScheme.scheme_name.ilike(f"%{clean_name}%")).first()
         if not scheme and len(cleaned) >= 4:
@@ -102,9 +117,8 @@ def _calculate_fund_returns(db: Session, scheme_id: Any) -> tuple[float | None, 
 
     def _get_past_nav(target_days: int) -> float | None:
         target_date = latest_date - timedelta(days=target_days)
-        # Find closest point
         closest = min(nav_pts, key=lambda p: abs((p.nav_date - target_date).days))
-        if abs((closest.nav_date - target_date).days) <= 15:
+        if abs((closest.nav_date - target_date).days) <= 25:
             return float(closest.nav)
         return None
 
@@ -112,11 +126,11 @@ def _calculate_fund_returns(db: Session, scheme_id: Any) -> tuple[float | None, 
     nav_3y = _get_past_nav(365 * 3)
     nav_5y = _get_past_nav(365 * 5)
 
-    r_1y = ((latest_nav - nav_1y) / nav_1y) if nav_1y else None
+    r_1y = ((latest_nav - nav_1y) / nav_1y) if nav_1y and nav_1y > 0 else None
     r_3y = ((latest_nav / nav_3y) ** (1 / 3) - 1.0) if nav_3y and nav_3y > 0 else None
     r_5y = ((latest_nav / nav_5y) ** (1 / 5) - 1.0) if nav_5y and nav_5y > 0 else None
 
-    coverage = "FULL" if (r_1y is not None and r_3y is not None and r_5y is not None) else "PARTIAL" if r_1y is not None else "INSUFFICIENT_DATA"
+    coverage = "FULL" if (r_1y is not None and r_3y is not None) else "PARTIAL" if (r_1y is not None or r_3y is not None) else "INSUFFICIENT_DATA"
     return (
         round(r_1y, 4) if r_1y is not None else None,
         round(r_3y, 4) if r_3y is not None else None,
@@ -125,37 +139,128 @@ def _calculate_fund_returns(db: Session, scheme_id: Any) -> tuple[float | None, 
     )
 
 
+def _calculate_fund_overlap(
+    db: Session,
+    target_scheme: FundScheme | None,
+    other_schemes: list[FundScheme],
+) -> tuple[float, list[str]]:
+    """
+    Computes true stock-level look-through portfolio overlap percentage between
+    target_scheme and all other mutual funds held in the portfolio.
+    Returns (overlap_percentage, top_overlapping_stocks).
+    """
+    if not target_scheme or not other_schemes:
+        return 0.0, []
+
+    target_holdings = db.query(SchemeHolding).filter(SchemeHolding.scheme_id == target_scheme.id).all()
+    if not target_holdings:
+        return 0.0, []
+
+    target_weights: dict[str, float] = {}
+    for th in target_holdings:
+        key = (th.company_isin or th.company_name).strip().upper()
+        target_weights[key] = float(th.weight_percentage)
+
+    other_ids = [s.id for s in other_schemes if s.id != target_scheme.id]
+    if not other_ids:
+        return 0.0, []
+
+    other_holdings = db.query(SchemeHolding).filter(SchemeHolding.scheme_id.in_(other_ids)).all()
+    if not other_holdings:
+        return 0.0, []
+
+    other_by_key: dict[str, list[float]] = {}
+    name_by_key: dict[str, str] = {}
+    for oh in other_holdings:
+        key = (oh.company_isin or oh.company_name).strip().upper()
+        other_by_key.setdefault(key, []).append(float(oh.weight_percentage))
+        name_by_key[key] = oh.company_name
+
+    overlap_weight_sum = 0.0
+    overlapping_items: list[tuple[str, float]] = []
+
+    for key, t_w in target_weights.items():
+        if key in other_by_key:
+            peer_weights = other_by_key[key]
+            max_peer_w = max(peer_weights)
+            intersection = min(t_w, max_peer_w)
+            overlap_weight_sum += intersection
+            overlapping_items.append((name_by_key.get(key, key), intersection))
+
+    overlapping_items.sort(key=lambda x: x[1], reverse=True)
+    top_stocks = [x[0] for x in overlapping_items[:3]]
+    return round(min(100.0, overlap_weight_sum), 1), top_stocks
+
+
 def _find_candidate_alternatives(
     db: Session,
     scheme: FundScheme | None,
     current_ter: float,
     monthly_amount: float,
 ) -> list[dict]:
-    """Finds lower TER candidate schemes in the same category."""
-    if not scheme or not scheme.category:
+    """Finds candidate replacement schemes in the same or complementary category."""
+    if not scheme:
         return []
 
-    candidates = db.query(FundScheme).filter(
-        FundScheme.category == scheme.category,
-        FundScheme.id != scheme.id,
-        FundScheme.expense_ratio < Decimal(str(current_ter)),
-    ).order_by(FundScheme.expense_ratio.asc()).limit(3).all()
+    def _is_self(c: FundScheme) -> bool:
+        if c.id == scheme.id:
+            return True
+        if scheme.isin and c.isin and c.isin.strip().upper() == scheme.isin.strip().upper():
+            return True
+        s_clean = re.sub(r"-\s*(Direct|Regular)?\s*(Plan)?\s*-\s*Growth.*$", "", scheme.scheme_name or "", flags=re.IGNORECASE).strip().lower()
+        c_clean = re.sub(r"-\s*(Direct|Regular)?\s*(Plan)?\s*-\s*Growth.*$", "", c.scheme_name or "", flags=re.IGNORECASE).strip().lower()
+        if s_clean and c_clean and s_clean == c_clean:
+            return True
+        return False
+
+    candidates: list[FundScheme] = []
+
+    # 1. Search for lower TER alternatives in the same category
+    if scheme.category:
+        lower_ter = db.query(FundScheme).filter(
+            FundScheme.category == scheme.category,
+            FundScheme.id != scheme.id,
+            FundScheme.expense_ratio < Decimal(str(current_ter)),
+        ).order_by(FundScheme.expense_ratio.asc()).all()
+        candidates.extend([c for c in lower_ter if not _is_self(c)])
+
+    # 2. If no lower TER scheme in same category, find top peer alternatives in same category
+    if len(candidates) < 3 and scheme.category:
+        same_cat_peers = db.query(FundScheme).filter(
+            FundScheme.category == scheme.category,
+            FundScheme.id != scheme.id,
+        ).order_by(FundScheme.expense_ratio.asc()).all()
+        for c in same_cat_peers:
+            if not _is_self(c) and c.id not in [cand.id for cand in candidates]:
+                candidates.append(c)
+
+    # 3. If still needed, provide low-cost index and core equity peers
+    if len(candidates) < 3:
+        fallback_peers = db.query(FundScheme).filter(
+            FundScheme.id != scheme.id,
+            FundScheme.scheme_code.in_(["120716", "100033", "120586", "120166", "118834", "120503", "118989", "120505"]),
+        ).order_by(FundScheme.expense_ratio.asc()).all()
+        for c in fallback_peers:
+            if not _is_self(c) and c.id not in [cand.id for cand in candidates]:
+                candidates.append(c)
 
     results = []
-    for c in candidates:
-        c_ter = float(c.expense_ratio)
-        diff = current_ter - c_ter
-        annual_sav = monthly_amount * 12.0 * diff
+    for c in candidates[:3]:
+        c_ter = float(c.expense_ratio) if c.expense_ratio is not None else 0.0075
+        diff = round(current_ter - c_ter, 4)
+        annual_sav = round(monthly_amount * 12.0 * max(0.0, diff), 2)
+        # Higher consistency score for lower TER direct funds
+        consistency = 90 if c_ter <= 0.003 else 85 if c_ter <= 0.007 else 75
         results.append({
             "scheme_code": c.scheme_code,
             "scheme_name": c.scheme_name,
             "isin": c.isin,
-            "category": c.category,
-            "amc_name": c.amc_name,
+            "category": c.category or "Equity",
+            "amc_name": c.amc_name or "Direct Mutual Fund",
             "expense_ratio": round(c_ter, 4),
-            "expense_ratio_diff": round(diff, 4),
-            "estimated_annual_savings": round(annual_sav, 2),
-            "consistency_score": 85 if c_ter <= 0.007 else 75,
+            "expense_ratio_diff": diff,
+            "estimated_annual_savings": annual_sav,
+            "consistency_score": consistency,
         })
     return results
 
@@ -168,10 +273,15 @@ def calculate_sip_health(
     """
     Evaluates health of active SIPs and mutual fund positions based on multi-factor analysis:
     expense ratio vs category, benchmark consistency across 1Y/3Y/5Y windows,
-    cadence/discipline, and portfolio overlap.
+    cadence/discipline, and portfolio look-through stock overlap.
     """
+    seed_market_baseline(db)
     transactions = transactions or []
-    mf_holdings = [h for h in holdings if h.asset_type == AssetType.MUTUAL_FUND or "MUTUAL" in str(h.asset_type).upper()]
+    mf_holdings = [
+        h for h in holdings
+        if (h.asset_type == AssetType.MUTUAL_FUND or "MUTUAL" in str(h.asset_type).upper())
+        and "STATEMENT" not in (h.name or "").upper()
+    ]
 
     if not mf_holdings:
         return {
@@ -189,6 +299,13 @@ def calculate_sip_health(
             "disclaimer": "SIP Health evaluates historical expense ratios, drawdown, and benchmark consistency. Does not predict future returns.",
         }
 
+    # Pre-resolve all schemes for overlap analysis
+    resolved_schemes_map: dict[str, FundScheme | None] = {}
+    for h in mf_holdings:
+        resolved_schemes_map[str(h.id)] = _resolve_scheme(db, h)
+
+    all_resolved_schemes = [s for s in resolved_schemes_map.values() if s is not None]
+
     sip_items = []
     total_score_sum = 0
     all_factors = []
@@ -198,7 +315,7 @@ def calculate_sip_health(
     total_monthly = 0.0
 
     for h in mf_holdings:
-        base_score = 75
+        base_score = 70
         factors = []
 
         # 1. Detect cadence & status
@@ -206,76 +323,109 @@ def calculate_sip_health(
         total_monthly += monthly_amt
         if status == "ACTIVE":
             active_count += 1
-            if tenure >= 6:
-                base_score += 5
-                factors.append({"name": f"Consistent SIP tenure ({tenure} months)", "impact": 5, "category": "DISCIPLINE"})
+            if tenure >= 12:
+                base_score += 6
+                factors.append({"name": f"Disciplined SIP tenure ({tenure} months)", "impact": 6, "category": "DISCIPLINE"})
+            elif tenure >= 6:
+                base_score += 4
+                factors.append({"name": f"Consistent SIP tenure ({tenure} months)", "impact": 4, "category": "DISCIPLINE"})
+            else:
+                base_score += 2
+                factors.append({"name": f"Recently started SIP ({tenure} months)", "impact": 2, "category": "DISCIPLINE"})
         elif status == "PAUSED":
             paused_count += 1
-            base_score -= 6
-            factors.append({"name": "SIP appears paused (no debits in 60-120 days)", "impact": -6, "category": "DISCIPLINE"})
+            base_score -= 8
+            factors.append({"name": "SIP appears paused (no debits in 60-120 days)", "impact": -8, "category": "DISCIPLINE"})
         else:
             stopped_count += 1
-            base_score -= 10
-            factors.append({"name": "SIP stopped or inactive (>120 days)", "impact": -10, "category": "DISCIPLINE"})
+            base_score -= 15
+            factors.append({"name": "SIP stopped or inactive (>120 days)", "impact": -15, "category": "DISCIPLINE"})
 
         # 2. Scheme lookup & Expense Ratio (TER) factor
-        scheme = _resolve_scheme(db, h)
-        ter = float(scheme.expense_ratio) if scheme else 0.0075
+        scheme = resolved_schemes_map.get(str(h.id))
+        ter = float(scheme.expense_ratio) if scheme and scheme.expense_ratio is not None else 0.0075
         category_name = scheme.category if scheme else "Equity"
 
-        is_regular = "REGULAR" in h.name.upper() if h.name else False
+        is_regular = "REGULAR" in (h.name or "").upper()
         if is_regular or ter > 0.012:
-            base_score -= 10
-            factors.append({"name": "Higher expense ratio (TER > 1.2% or Regular Plan commission drag)", "impact": -10, "category": "EXPENSE"})
-        elif ter <= 0.006:
-            base_score += 8
-            factors.append({"name": "Low Direct Plan expense ratio (TER <= 0.60%)", "impact": 8, "category": "EXPENSE"})
+            base_score -= 12
+            factors.append({"name": f"Higher expense ratio ({ter*100:.2f}% TER or Regular Plan commission bleed)", "impact": -12, "category": "EXPENSE"})
+        elif ter <= 0.0025:
+            base_score += 10
+            factors.append({"name": f"Ultra-low Direct Plan expense ratio ({ter*100:.2f}% TER)", "impact": 10, "category": "EXPENSE"})
+        elif ter <= 0.0050:
+            base_score += 7
+            factors.append({"name": f"Low Direct Plan expense ratio ({ter*100:.2f}% TER)", "impact": 7, "category": "EXPENSE"})
+        elif ter <= 0.0070:
+            base_score += 4
+            factors.append({"name": f"Competitive Direct Plan expense ratio ({ter*100:.2f}% TER)", "impact": 4, "category": "EXPENSE"})
+        elif ter <= 0.0100:
+            base_score += 1
+            factors.append({"name": f"Moderate expense ratio within category norms ({ter*100:.2f}% TER)", "impact": 1, "category": "EXPENSE"})
         else:
-            factors.append({"name": "Moderate expense ratio within category norms", "impact": 2, "category": "EXPENSE"})
-            base_score += 2
+            base_score -= 4
+            factors.append({"name": f"Above-average expense ratio ({ter*100:.2f}% TER)", "impact": -4, "category": "EXPENSE"})
 
-        # 3. Portfolio Overlap factor
-        overlap_score = 0.0
-        if len(mf_holdings) > 4:
-            overlap_score = 45.0
-            base_score -= 6
-            factors.append({"name": "Portfolio holds > 4 schemes (potential duplication and overlap)", "impact": -6, "category": "OVERLAP"})
-        elif len(mf_holdings) > 2:
-            overlap_score = 25.0
-            factors.append({"name": "Moderate fund diversification across 3-4 schemes", "impact": 2, "category": "OVERLAP"})
-            base_score += 2
+        # 3. Look-Through Portfolio Overlap factor
+        other_schemes = [s for s in all_resolved_schemes if not scheme or s.id != scheme.id]
+        overlap_pct, top_overlap_stocks = _calculate_fund_overlap(db, scheme, other_schemes)
+
+        if overlap_pct <= 10.0:
+            base_score += 7
+            factors.append({"name": f"Distinct portfolio allocation ({overlap_pct}% overlap with peers)", "impact": 7, "category": "OVERLAP"})
+        elif overlap_pct <= 25.0:
+            base_score += 4
+            factors.append({"name": f"Low portfolio overlap ({overlap_pct}%)", "impact": 4, "category": "OVERLAP"})
+        elif overlap_pct <= 40.0:
+            overlap_desc = f" ({', '.join(top_overlap_stocks[:2])})" if top_overlap_stocks else ""
+            base_score -= 2
+            factors.append({"name": f"Moderate portfolio overlap ({overlap_pct}% in shared core holdings{overlap_desc})", "impact": -2, "category": "OVERLAP"})
         else:
-            overlap_score = 10.0
-            base_score += 5
-            factors.append({"name": "Focused allocation with minimal fund overlap", "impact": 5, "category": "OVERLAP"})
+            overlap_desc = f" ({', '.join(top_overlap_stocks[:2])})" if top_overlap_stocks else ""
+            base_score -= 8
+            factors.append({"name": f"High duplication risk ({overlap_pct}% overlap with peer funds{overlap_desc})", "impact": -8, "category": "OVERLAP"})
 
-        # 4. Returns consistency windows (1Y, 3Y, 5Y)
+        # 4. Trailing Returns (1Y & 3Y CAGR)
         r_1y, r_3y, r_5y, coverage = (None, None, None, "INSUFFICIENT_DATA")
         if scheme:
             r_1y, r_3y, r_5y, coverage = _calculate_fund_returns(db, scheme.id)
 
-        if coverage == "FULL":
-            if (r_1y or 0) > 0.12 and (r_3y or 0) > 0.10:
-                base_score += 8
-                factors.append({"name": "Consistent top-quartile 1Y and 3Y benchmark returns", "impact": 8, "category": "PERFORMANCE"})
-            else:
+        if r_3y is not None:
+            if r_3y >= 0.18:
+                base_score += 9
+                factors.append({"name": f"Outstanding 3-year CAGR ({r_3y*100:.1f}%)", "impact": 9, "category": "PERFORMANCE"})
+            elif r_3y >= 0.14:
+                base_score += 6
+                factors.append({"name": f"Strong 3-year CAGR ({r_3y*100:.1f}%)", "impact": 6, "category": "PERFORMANCE"})
+            elif r_3y >= 0.10:
                 base_score += 3
-                factors.append({"name": "Historical returns track category benchmarks", "impact": 3, "category": "PERFORMANCE"})
-        elif coverage == "PARTIAL":
-            if (r_1y or 0) > 0.10:
-                base_score += 4
-                factors.append({"name": "Positive 1-year trailing momentum", "impact": 4, "category": "PERFORMANCE"})
+                factors.append({"name": f"Consistent 3-year CAGR ({r_3y*100:.1f}%) tracking market", "impact": 3, "category": "PERFORMANCE"})
+            else:
+                base_score -= 4
+                factors.append({"name": f"Below-average 3-year CAGR ({r_3y*100:.1f}%)", "impact": -4, "category": "PERFORMANCE"})
+
+            if r_1y is not None and r_1y >= 0.15:
+                base_score += 2
+                factors.append({"name": f"High 1-year trailing momentum (+{r_1y*100:.1f}%)", "impact": 2, "category": "PERFORMANCE"})
+        elif r_1y is not None:
+            if r_1y >= 0.15:
+                base_score += 5
+                factors.append({"name": f"High 1-year trailing momentum (+{r_1y*100:.1f}%)", "impact": 5, "category": "PERFORMANCE"})
+            elif r_1y >= 0.10:
+                base_score += 3
+                factors.append({"name": f"Positive 1-year trailing return (+{r_1y*100:.1f}%)", "impact": 3, "category": "PERFORMANCE"})
+            else:
+                base_score -= 2
+                factors.append({"name": f"Modest 1-year return (+{r_1y*100:.1f}%)", "impact": -2, "category": "PERFORMANCE"})
         else:
-            factors.append({"name": "Limited daily NAV history for 3Y/5Y window", "impact": 0, "category": "PERFORMANCE"})
+            factors.append({"name": "Historical NAV tracking limited", "impact": 0, "category": "PERFORMANCE"})
 
         final_score = min(100, max(0, base_score))
         total_score_sum += final_score
         grade, rating = _score_to_grade(final_score)
 
         # Candidate alternatives for comparison simulation
-        candidate_alts = []
-        if grade in ("C", "D") or ter > 0.008 or is_regular:
-            candidate_alts = _find_candidate_alternatives(db, scheme, ter, monthly_amt)
+        candidate_alts = _find_candidate_alternatives(db, scheme, ter, monthly_amt)
 
         sip_items.append({
             "holding_id": str(h.id),
@@ -292,13 +442,13 @@ def calculate_sip_health(
             "returns_3y": r_3y,
             "returns_5y": r_5y,
             "returns_coverage": coverage,
-            "overlap_score": overlap_score,
+            "overlap_score": overlap_pct,
             "factors": factors,
             "candidate_alternatives": candidate_alts,
         })
         all_factors.extend(factors)
 
-    overall_score = int(total_score_sum / len(mf_holdings)) if mf_holdings else 75
+    overall_score = int(round(total_score_sum / len(mf_holdings))) if mf_holdings else 75
     overall_grade, overall_rating = _score_to_grade(overall_score)
 
     return {
@@ -336,22 +486,33 @@ def simulate_sip_switch(
 
     # Current metrics
     target_scheme = _resolve_scheme(db, target)
-    curr_ter = float(target_scheme.expense_ratio) if target_scheme else 0.0095
-    repl_ter = float(replacement.expense_ratio)
+    curr_ter = float(target_scheme.expense_ratio) if target_scheme and target_scheme.expense_ratio is not None else 0.0095
+    repl_ter = float(replacement.expense_ratio) if replacement.expense_ratio is not None else 0.0050
 
     # Monthly commitment
     status, monthly_amt, _ = _detect_sip_status_and_cadence(target, transactions or [])
 
-    # Calculations
+    # Fee savings calculations
     ter_diff = max(0.0, curr_ter - repl_ter)
     ter_savings_pct = (ter_diff / curr_ter * 100.0) if curr_ter > 0 else 0.0
     annual_savings = monthly_amt * 12.0 * ter_diff
-    # 5-year compounding simulation (assuming 12% nominal growth)
-    projected_5y = annual_savings * 5.0 * 1.15
 
-    # Simulated score delta
-    score_before = 68 if curr_ter > 0.010 else 74
-    score_after = min(100, score_before + (14 if ter_diff >= 0.003 else 8))
+    # 5-year compounding simulation using ordinary annuity formula FV = P * (((1 + r)^n - 1) / r)
+    # at 12% p.a. equity rate (~6.35x annual savings)
+    r = 0.12
+    projected_5y = annual_savings * (((1.0 + r) ** 5 - 1.0) / r) if annual_savings > 0 else 0.0
+
+    # Dynamic score delta
+    score_before = 72
+    if curr_ter <= 0.003:
+        score_before = 88
+    elif curr_ter <= 0.006:
+        score_before = 82
+    elif curr_ter > 0.012:
+        score_before = 62
+
+    score_boost = 12 if ter_diff >= 0.005 else 8 if ter_diff >= 0.002 else 3 if ter_diff > 0 else 0
+    score_after = min(100, score_before + score_boost)
     grade_before, _ = _score_to_grade(score_before)
     grade_after, _ = _score_to_grade(score_after)
 

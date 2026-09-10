@@ -58,8 +58,36 @@ export function HHIConcentrationMeter() {
   };
 
   const status = getHHIStatus(hhi);
-  const top5 = companyExposures.slice(0, 5);
-  const top5TotalPercent = top5.reduce((acc, c) => acc + c.totalTruePercent, 0);
+
+  const topItems = React.useMemo(() => {
+    if (companyExposures.length > 0) {
+      return companyExposures.slice(0, 5).map((c) => ({
+        id: c.id,
+        name: c.companyName,
+        weight: Number(c.totalTruePercent) || 0,
+        squared: Math.round((Number(c.totalTruePercent) || 0) * (Number(c.totalTruePercent) || 0)),
+      }));
+    }
+    const totalVal = holdings.reduce(
+      (sum, h) => sum + (Number(h.currentValue) || 0),
+      0
+    );
+    if (totalVal <= 0) return [];
+    const sorted = [...holdings].sort(
+      (a, b) => (Number(b.currentValue) || 0) - (Number(a.currentValue) || 0)
+    );
+    return sorted.slice(0, 5).map((h, i) => {
+      const weight = ((Number(h.currentValue) || 0) / totalVal) * 100;
+      return {
+        id: h.id || `h_${i}`,
+        name: h.name,
+        weight,
+        squared: Math.round(weight * weight),
+      };
+    });
+  }, [companyExposures, holdings]);
+
+  const topTotalPercent = topItems.reduce((acc, c) => acc + c.weight, 0);
 
   return (
     <div className="rounded-2xl border border-border bg-[var(--card)] p-6 shadow-xl shadow-black/30 text-foreground relative overflow-hidden">
@@ -119,24 +147,25 @@ export function HHIConcentrationMeter() {
         {/* Top 5 Contributions Breakdown */}
         <div className="space-y-3">
           <div className="flex items-center justify-between text-xs pb-1 border-b border-border/70">
-            <span className="font-semibold text-muted-foreground">Top 5 True Company Holdings</span>
+            <span className="font-semibold text-muted-foreground">
+              {companyExposures.length > 0 ? "Top 5 True Company Holdings" : "Top 5 Portfolio Holdings"}
+            </span>
             <span className="font-mono text-xs font-bold text-primary tabular-nums">
-              {top5TotalPercent.toFixed(1)}% of Net Worth
+              {topTotalPercent.toFixed(1)}% of Net Worth
             </span>
           </div>
 
           <div className="space-y-2">
-            {top5.map((c) => {
-              const squared = Math.round(c.totalTruePercent * c.totalTruePercent);
+            {topItems.map((c) => {
               return (
                 <div key={c.id} className="p-3 rounded-xl bg-[var(--background-elevated)] border border-border/70 flex items-center justify-between text-xs hover:border-border-strong transition-colors">
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full bg-primary" />
-                    <span className="font-semibold text-foreground">{c.companyName}</span>
+                    <span className="font-semibold text-foreground truncate max-w-[180px]">{c.name}</span>
                   </div>
                   <div className="flex items-center gap-3 font-mono">
-                    <span className="text-muted-foreground tabular-nums">{c.totalTruePercent.toFixed(1)}% weight</span>
-                    <span className="text-primary font-bold tabular-nums">+{squared} HHI pts</span>
+                    <span className="text-muted-foreground tabular-nums">{c.weight.toFixed(1)}% weight</span>
+                    <span className="text-primary font-bold tabular-nums">+{c.squared} HHI pts</span>
                   </div>
                 </div>
               );
@@ -158,7 +187,7 @@ export function HHIConcentrationMeter() {
           <InsightFlag
             severity={hhi > 2500 ? "danger" : "warning"}
             headline={`HHI score of ${hhi} is above the safe threshold of 1,500`}
-            why={`At this score, your top 5 holdings alone account for ${top5TotalPercent.toFixed(1)}% of net worth — a correction in just one of them moves your entire portfolio, not just one line item.`}
+            why={`At this score, your top 5 holdings alone account for ${topTotalPercent.toFixed(1)}% of net worth — a correction in just one of them moves your entire portfolio, not just one line item.`}
             fixLabel="Run a fund-swap simulation to bring this down"
             onFix={() => router.push("/simulator")}
           />

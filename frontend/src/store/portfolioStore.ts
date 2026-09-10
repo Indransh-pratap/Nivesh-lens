@@ -95,6 +95,20 @@ interface PortfolioState {
 
   isPanicGuardOpen: boolean;
 
+  activePortfolioId: string | null;
+
+  setActivePortfolioId: (
+    id: string | null
+  ) => void;
+
+  setCompanyExposures: (
+    exposures: CompanyExposureItem[]
+  ) => void;
+
+  loadActivePortfolio: (
+    force?: boolean
+  ) => Promise<string | null>;
+
   setHoldings: (
     holdings: Holding[]
   ) => void;
@@ -307,6 +321,125 @@ export const usePortfolioStore =
       isPdfModalOpen: false,
 
       isPanicGuardOpen: false,
+
+      activePortfolioId:
+        typeof window !== "undefined"
+          ? localStorage.getItem("nivesh_active_portfolio_id")
+          : null,
+
+      setActivePortfolioId: (id) => {
+        if (typeof window !== "undefined") {
+          if (id) {
+            localStorage.setItem("nivesh_active_portfolio_id", id);
+          } else {
+            localStorage.removeItem("nivesh_active_portfolio_id");
+          }
+        }
+        set({ activePortfolioId: id });
+      },
+
+      setCompanyExposures: (companyExposures) =>
+        set({ companyExposures }),
+
+      loadActivePortfolio: async (force?: boolean) => {
+        const currentId =
+          get().activePortfolioId ||
+          (typeof window !== "undefined"
+            ? localStorage.getItem("nivesh_active_portfolio_id")
+            : null);
+
+        if (!force && currentId && get().holdings.length > 0) {
+          return currentId;
+        }
+
+        try {
+          const res = await fetch("/api/portfolio/portfolios", {
+            method: "GET",
+            credentials: "include",
+            cache: "no-store",
+          });
+
+          if (!res.ok) return null;
+          const data = await res.json();
+          if (!Array.isArray(data) || data.length === 0) return null;
+
+          const active =
+            (currentId ? data.find((item: any) => item.id === currentId) : null) ??
+            data.find((item: any) => item.name === "CAS Portfolio") ??
+            data[0];
+
+          if (!active?.id) return null;
+
+          if (typeof window !== "undefined") {
+            localStorage.setItem("nivesh_active_portfolio_id", active.id);
+          }
+
+          set({ activePortfolioId: active.id });
+
+          if (Array.isArray(active.holdings) && active.holdings.length > 0) {
+            const totalVal = active.holdings.reduce(
+              (sum: number, h: any) =>
+                sum + (Number(h.current_value ?? h.currentValue) || 0),
+              0
+            );
+
+            const normalized = active.holdings.map((item: any, idx: number) => {
+              const curVal = Number(item.current_value ?? item.currentValue) || 0;
+              const curPrice = Number(item.current_price ?? item.currentPrice) || 0;
+              const avgCost = Number(item.average_price ?? item.averageCost) || 0;
+              const qty = Number(item.quantity ?? item.units) || 0;
+              const retVal = Number(item.returns_value ?? item.returnsValue) || 0;
+              const retPct = Number(item.returns) || 0;
+              const rawType = String(
+                item.asset_type ?? item.assetType ?? item.type ?? ""
+              ).toUpperCase();
+              const isMF =
+                rawType.includes("MUTUAL") ||
+                rawType === "MUTUAL_FUND" ||
+                item.type === "Mutual Fund";
+
+              return {
+                id: item.id ?? `holding_${idx}`,
+                name: item.name ?? "Unnamed Holding",
+                type: isMF ? "Mutual Fund" : "Stock",
+                ticker: item.ticker ?? item.isin?.slice(0, 6) ?? `H${idx + 1}`,
+                isin: item.isin ?? undefined,
+                quantity: qty,
+                units: qty,
+                avgPrice: avgCost,
+                averageCost: avgCost,
+                currentValue: curVal,
+                currentPrice: curPrice,
+                returns: retPct,
+                returnsValue: retVal,
+                allocation: totalVal > 0 ? (curVal / totalVal) * 100 : 0,
+                planType:
+                  item.plan_type === "Regular" || item.planType === "Regular"
+                    ? "Regular"
+                    : "Direct",
+                expenseRatio:
+                  Number(item.expense_ratio ?? item.expenseRatio) || 0,
+                riskGrade:
+                  item.risk_grade === "High" || item.riskGrade === "High"
+                    ? "High"
+                    : item.risk_grade === "Medium" || item.riskGrade === "Medium"
+                      ? "Medium"
+                      : "Low",
+                sector: isMF ? "Diversified MF" : "Equity",
+                nomineeStatus: "Verified",
+                assetClass: isMF ? "Mutual Fund" : "Equity",
+              } as unknown as Holding;
+            });
+
+            get().setHoldings(normalized);
+          }
+
+          return active.id;
+        } catch (e) {
+          console.warn("Could not auto-load active portfolio:", e);
+          return null;
+        }
+      },
 
       setHoldings: (
         holdings
@@ -825,12 +958,34 @@ export const usePortfolioStore =
 
       getHHIConcentrationScore: () => {
         const exposures = get().companyExposures;
-        if (!exposures || exposures.length === 0) return 0;
-        const squaredSum = exposures.reduce(
-          (total, exposure) =>
-            total + (exposure.totalTruePercent || 0) * (exposure.totalTruePercent || 0),
+        if (exposures && exposures.length > 0) {
+          const squaredSum = exposures.reduce(
+            (total, exposure) =>
+              total +
+              (Number(exposure.totalTruePercent) || 0) *
+                (Number(exposure.totalTruePercent) || 0),
+            0
+          );
+          return Math.min(Math.round(squaredSum), 10000);
+        }
+
+        const holdings = get().holdings;
+        if (!holdings || holdings.length === 0) return 0;
+
+        const totalValue = holdings.reduce(
+          (sum, h) => sum + (Number(h.currentValue) || 0),
           0
         );
+
+        if (totalValue <= 0) return 0;
+
+        const squaredSum = holdings.reduce((total, h) => {
+          const val = Number(h.currentValue) || 0;
+          if (val <= 0) return total;
+          const weightPct = (val / totalValue) * 100;
+          return total + weightPct * weightPct;
+        }, 0);
+
         return Math.min(Math.round(squaredSum), 10000);
       },
 

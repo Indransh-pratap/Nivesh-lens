@@ -18,6 +18,11 @@ interface ChatMessage {
   timestamp: string;
   badges?: string[];
   metrics?: { label: string; value: string; color?: string }[];
+  sources?: { title: string; url: string; published?: string | null }[];
+  summary?: string;
+  insights?: string[];
+  recommendations?: { fund_name?: string; category?: string; role?: string; why?: string }[];
+  risks?: string[];
 }
 
 const PROMPT_SUGGESTIONS = [
@@ -122,23 +127,29 @@ export function InteractiveWhatsAppAgent() {
       const chatRes = await fetch(`/api/portfolio/portfolios/${activePortfolioId}/ai/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: text }),
+        body: JSON.stringify({
+          question: text,
+          conversation: messages.slice(-6).map((message) => ({
+            role: message.sender === "user" ? "user" : "assistant",
+            content: message.text,
+          })),
+        }),
       });
 
       if (chatRes.ok) {
         const chatData = await chatRes.json();
-        const metrics = chatData.supporting_facts?.slice(0, 3).map((fact: string, idx: number) => ({
-          label: idx === 0 ? "Fact 1" : idx === 1 ? "Fact 2" : "Fact 3",
-          value: fact.length > 50 ? fact.slice(0, 47) + "..." : fact,
-          color: "text-foreground",
-        }));
-
         const botResponse: ChatMessage = {
           id: `bot_${Date.now()}`,
           sender: "bot",
           text: chatData.answer,
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          metrics: metrics && metrics.length > 0 ? metrics : undefined,
+          summary: typeof chatData.summary === "string" ? chatData.summary : undefined,
+          insights: Array.isArray(chatData.portfolio_insights) ? chatData.portfolio_insights : undefined,
+          recommendations: Array.isArray(chatData.recommendations) ? chatData.recommendations : undefined,
+          risks: Array.isArray(chatData.risks) ? chatData.risks : undefined,
+          sources: Array.isArray(chatData.web_sources)
+            ? chatData.web_sources.filter((source: any) => source?.title && source?.url).slice(0, 5)
+            : undefined,
         };
 
         setMessages(prev => [...prev, botResponse]);
@@ -212,6 +223,42 @@ export function InteractiveWhatsAppAgent() {
           >
             <p className="leading-relaxed text-[12.5px] whitespace-pre-wrap">{m.text}</p>
 
+            {m.summary && m.summary !== m.text && (
+              <div className="rounded-lg bg-primary/5 border border-primary/20 p-2 text-[11px]">
+                <span className="font-semibold text-primary">Short answer</span>
+                <p className="mt-1">{m.summary}</p>
+              </div>
+            )}
+
+            {m.insights && m.insights.length > 0 && (
+              <div className="pt-2 border-t border-border text-[11px]">
+                <span className="font-semibold text-muted-foreground">Portfolio-specific insight</span>
+                <ul className="mt-1 list-disc pl-4 space-y-1">{m.insights.map((item, i) => <li key={i}>{item}</li>)}</ul>
+              </div>
+            )}
+
+            {m.recommendations && m.recommendations.length > 0 && (
+              <div className="pt-2 border-t border-border text-[11px]">
+                <span className="font-semibold text-muted-foreground">What to evaluate</span>
+                <div className="mt-1 space-y-2">
+                  {m.recommendations.map((item, i) => (
+                    <div key={i} className="rounded-md bg-accent/40 p-2">
+                      <p className="font-semibold">{item.fund_name || item.category || "Portfolio option"}</p>
+                      {item.role && <p className="text-muted-foreground">{item.role}</p>}
+                      {item.why && <p className="mt-0.5">{item.why}</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {m.risks && m.risks.length > 0 && (
+              <div className="pt-2 border-t border-border text-[11px]">
+                <span className="font-semibold text-amber-600">Risks / caveats</span>
+                <ul className="mt-1 list-disc pl-4 space-y-1">{m.risks.map((item, i) => <li key={i}>{item}</li>)}</ul>
+              </div>
+            )}
+
             {m.metrics && (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 border-t border-border font-mono text-[11px]">
                 {m.metrics.map((met, idx) => (
@@ -220,6 +267,25 @@ export function InteractiveWhatsAppAgent() {
                     <span className={cn("font-bold text-xs break-words", met.color || "text-foreground")}>{met.value}</span>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {m.sources && m.sources.length > 0 && (
+              <div className="pt-2 border-t border-border text-[10px]">
+                <span className="font-semibold text-muted-foreground">Sources</span>
+                <div className="mt-1 space-y-1">
+                  {m.sources.map((source) => (
+                    <a
+                      key={source.url}
+                      href={source.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block truncate text-primary hover:underline"
+                    >
+                      {source.title}
+                    </a>
+                  ))}
+                </div>
               </div>
             )}
 

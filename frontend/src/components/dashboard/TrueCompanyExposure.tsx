@@ -28,7 +28,7 @@ export function TrueCompanyExposure({
   portfolioId,
   defaultExpandedFirst = false,
 }: TrueCompanyExposureProps) {
-  const { holdings, openSyncModal } = usePortfolioStore();
+  const { holdings, openSyncModal, setCompanyExposures } = usePortfolioStore();
 
   const [data, setData] = useState<CompanyExposureResponse | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -76,6 +76,35 @@ export function TrueCompanyExposure({
 
       const res = await getCompanyExposure(targetId);
       setData(res);
+      if (Array.isArray(res.companies)) {
+        setCompanyExposures(
+          res.companies.map((c) => ({
+            id: c.company_id,
+            companyName: c.company_name,
+            ticker: c.ticker || "",
+            sector: c.sector || "",
+            conglomerateGroup: "",
+            directValue: c.direct_value || 0,
+            directPercent: c.direct_percent || 0,
+            indirectValue: c.mutual_fund_value || 0,
+            indirectPercent: c.mutual_fund_percent || 0,
+            totalTrueValue: c.combined_value || 0,
+            totalTruePercent: c.combined_percent || 0,
+            riskCategory: "Medium",
+            promoterPledging: 0,
+            fiiHolding: 0,
+            supplyChainVulnerability: "Low",
+            heldViaFunds: c.sources
+              .filter((s) => s.type === "mutual_fund")
+              .map((s) => ({
+                fundName: s.fund_name || "Mutual Fund",
+                fundTicker: s.fund_isin?.slice(0, 6) || "",
+                fundAllocation: s.company_weight || 0,
+                indirectValue: s.exposure_value || 0,
+              })),
+          }))
+        );
+      }
       if (defaultExpandedFirst && res.companies.length > 0) {
         setExpandedCompanyIds(new Set([res.companies[0].company_id]));
       }
@@ -87,60 +116,25 @@ export function TrueCompanyExposure({
     } finally {
       setIsLoading(false);
     }
-  }, [resolveTargetPortfolioId, defaultExpandedFirst]);
+  }, [resolveTargetPortfolioId, defaultExpandedFirst, setCompanyExposures]);
 
   useEffect(() => {
-    let isCancelled = false;
-
-    const run = async () => {
-      try {
-        const targetId = await resolveTargetPortfolioId();
-        if (!targetId) {
-          if (!isCancelled) {
-            setData(null);
-            setIsLoading(false);
-          }
-          return;
-        }
-
-        const res = await getCompanyExposure(targetId);
-        if (!isCancelled) {
-          setData(res);
-          if (defaultExpandedFirst && res.companies.length > 0) {
-            setExpandedCompanyIds(new Set([res.companies[0].company_id]));
-          }
-        }
-      } catch (err: unknown) {
-        if (!isCancelled) {
-          console.error("Failed to load company exposure:", err);
-          setErrorMessage(
-            err instanceof Error ? err.message : "Unable to calculate company exposure"
-          );
-        }
-      } finally {
-        if (!isCancelled) {
-          setIsLoading(false);
-        }
-      }
-    };
-
-    void run();
-
-    const handlePortfolioUpdated = () => {
-      void run();
-    };
+    // Keep one request path. The previous implementation also fetched the
+    // same endpoint in an inline effect, causing duplicate expensive
+    // look-through calculations and racing state updates.
+    void loadData();
+    const handlePortfolioUpdated = () => void loadData();
 
     if (typeof window !== "undefined") {
       window.addEventListener("nivesh_portfolio_updated", handlePortfolioUpdated);
     }
 
     return () => {
-      isCancelled = true;
       if (typeof window !== "undefined") {
         window.removeEventListener("nivesh_portfolio_updated", handlePortfolioUpdated);
       }
     };
-  }, [resolveTargetPortfolioId, defaultExpandedFirst, holdings]);
+  }, [loadData]);
 
   const toggleExpand = (id: string) => {
     setExpandedCompanyIds((prev) => {

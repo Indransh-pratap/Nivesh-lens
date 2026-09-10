@@ -46,6 +46,16 @@ class GeminiProvider(LLMProvider):
     def _resolve_model(self, tier: str) -> str:
         return self.model_pro if tier == "pro" else self.model_fast
 
+    def _get_fallback_model(self, current_model: str) -> str | None:
+        """Returns alternative model with separate quota pool if current model is unavailable or rate-limited."""
+        if current_model == "gemini-3.6-flash":
+            return "gemini-3.5-flash-lite"
+        if current_model == "gemini-3.5-flash-lite":
+            return "gemini-3.6-flash"
+        if current_model == "gemini-3.5-flash":
+            return "gemini-3.6-flash"
+        return "gemini-3.6-flash"
+
     def _build_payload(
         self,
         prompt: str,
@@ -128,12 +138,14 @@ class GeminiProvider(LLMProvider):
         }
 
         retries = 0
+        last_status_code = None
         while retries <= self.max_retries:
             start_time = time.perf_counter()
             try:
                 with httpx.Client(timeout=self.timeout) as client:
                     resp = client.post(url, json=payload, headers=headers)
                     latency = (time.perf_counter() - start_time) * 1000
+                    last_status_code = resp.status_code
 
                     if resp.status_code == 200:
                         data = resp.json()
@@ -141,11 +153,25 @@ class GeminiProvider(LLMProvider):
                         return self._extract_text_response(data)
 
                     if resp.status_code == 429:
-                        if retries < self.max_retries:
-                            time.sleep(2 ** retries)
+                        if retries >= self.max_retries:
+                            raise LLMRateLimitError()
+                        fallback = self._get_fallback_model(model)
+                        if fallback and fallback != model:
+                            logger.info(f"Switching model {model} -> {fallback} due to HTTP 429")
+                            model = fallback
+                            url = f"{GEMINI_API_BASE}/{model}:generateContent"
+                        time.sleep(2 ** retries)
+                        retries += 1
+                        continue
+
+                    if resp.status_code == 404:
+                        fallback = self._get_fallback_model(model)
+                        if fallback and fallback != model:
+                            logger.info(f"Switching model {model} -> {fallback} due to HTTP 404")
+                            model = fallback
+                            url = f"{GEMINI_API_BASE}/{model}:generateContent"
                             retries += 1
                             continue
-                        raise LLMRateLimitError()
 
                     if resp.status_code >= 500 and retries < self.max_retries:
                         time.sleep(2 ** retries)
@@ -169,6 +195,8 @@ class GeminiProvider(LLMProvider):
             except Exception as exc:
                 raise LLMError(f"Unexpected error communicating with Gemini: {str(exc)}") from exc
 
+        if last_status_code == 429:
+            raise LLMRateLimitError()
         raise LLMError("Exceeded max retries calling Gemini API")
 
     async def generate_text_async(
@@ -189,12 +217,14 @@ class GeminiProvider(LLMProvider):
         }
 
         retries = 0
+        last_status_code = None
         while retries <= self.max_retries:
             start_time = time.perf_counter()
             try:
                 async with httpx.AsyncClient(timeout=self.timeout) as client:
                     resp = await client.post(url, json=payload, headers=headers)
                     latency = (time.perf_counter() - start_time) * 1000
+                    last_status_code = resp.status_code
 
                     if resp.status_code == 200:
                         data = resp.json()
@@ -202,11 +232,25 @@ class GeminiProvider(LLMProvider):
                         return self._extract_text_response(data)
 
                     if resp.status_code == 429:
-                        if retries < self.max_retries:
-                            await asyncio.sleep(2 ** retries)
+                        if retries >= self.max_retries:
+                            raise LLMRateLimitError()
+                        fallback = self._get_fallback_model(model)
+                        if fallback and fallback != model:
+                            logger.info(f"Switching model {model} -> {fallback} due to HTTP 429")
+                            model = fallback
+                            url = f"{GEMINI_API_BASE}/{model}:generateContent"
+                        await asyncio.sleep(2 ** retries)
+                        retries += 1
+                        continue
+
+                    if resp.status_code == 404:
+                        fallback = self._get_fallback_model(model)
+                        if fallback and fallback != model:
+                            logger.info(f"Switching model {model} -> {fallback} due to HTTP 404")
+                            model = fallback
+                            url = f"{GEMINI_API_BASE}/{model}:generateContent"
                             retries += 1
                             continue
-                        raise LLMRateLimitError()
 
                     if resp.status_code >= 500 and retries < self.max_retries:
                         await asyncio.sleep(2 ** retries)
@@ -230,6 +274,8 @@ class GeminiProvider(LLMProvider):
             except Exception as exc:
                 raise LLMError(f"Unexpected error communicating with Gemini: {str(exc)}") from exc
 
+        if last_status_code == 429:
+            raise LLMRateLimitError()
         raise LLMError("Exceeded max retries calling Gemini API")
 
     def generate_structured(
@@ -250,12 +296,14 @@ class GeminiProvider(LLMProvider):
         }
 
         retries = 0
+        last_status_code = None
         while retries <= self.max_retries:
             start_time = time.perf_counter()
             try:
                 with httpx.Client(timeout=self.timeout) as client:
                     resp = client.post(url, json=payload, headers=headers)
                     latency = (time.perf_counter() - start_time) * 1000
+                    last_status_code = resp.status_code
 
                     if resp.status_code == 200:
                         data = resp.json()
@@ -280,11 +328,25 @@ class GeminiProvider(LLMProvider):
                             raise LLMValidationError(f"Gemini output failed schema validation: {str(val_err)}") from val_err
 
                     if resp.status_code == 429:
-                        if retries < self.max_retries:
-                            time.sleep(2 ** retries)
+                        if retries >= self.max_retries:
+                            raise LLMRateLimitError()
+                        fallback = self._get_fallback_model(model)
+                        if fallback and fallback != model:
+                            logger.info(f"Switching model {model} -> {fallback} due to HTTP 429")
+                            model = fallback
+                            url = f"{GEMINI_API_BASE}/{model}:generateContent"
+                        time.sleep(2 ** retries)
+                        retries += 1
+                        continue
+
+                    if resp.status_code == 404:
+                        fallback = self._get_fallback_model(model)
+                        if fallback and fallback != model:
+                            logger.info(f"Switching model {model} -> {fallback} due to HTTP 404")
+                            model = fallback
+                            url = f"{GEMINI_API_BASE}/{model}:generateContent"
                             retries += 1
                             continue
-                        raise LLMRateLimitError()
 
                     if resp.status_code >= 500 and retries < self.max_retries:
                         time.sleep(2 ** retries)
@@ -304,6 +366,8 @@ class GeminiProvider(LLMProvider):
             except Exception as exc:
                 raise LLMError(f"Unexpected error communicating with Gemini: {str(exc)}") from exc
 
+        if last_status_code == 429:
+            raise LLMRateLimitError()
         raise LLMError("Exceeded max retries calling Gemini API")
 
     async def generate_structured_async(
@@ -325,12 +389,14 @@ class GeminiProvider(LLMProvider):
         }
 
         retries = 0
+        last_status_code = None
         while retries <= self.max_retries:
             start_time = time.perf_counter()
             try:
                 async with httpx.AsyncClient(timeout=self.timeout) as client:
                     resp = await client.post(url, json=payload, headers=headers)
                     latency = (time.perf_counter() - start_time) * 1000
+                    last_status_code = resp.status_code
 
                     if resp.status_code == 200:
                         data = resp.json()
@@ -354,11 +420,25 @@ class GeminiProvider(LLMProvider):
                             raise LLMValidationError(f"Gemini output failed schema validation: {str(val_err)}") from val_err
 
                     if resp.status_code == 429:
-                        if retries < self.max_retries:
-                            await asyncio.sleep(2 ** retries)
+                        if retries >= self.max_retries:
+                            raise LLMRateLimitError()
+                        fallback = self._get_fallback_model(model)
+                        if fallback and fallback != model:
+                            logger.info(f"Switching model {model} -> {fallback} due to HTTP 429")
+                            model = fallback
+                            url = f"{GEMINI_API_BASE}/{model}:generateContent"
+                        await asyncio.sleep(2 ** retries)
+                        retries += 1
+                        continue
+
+                    if resp.status_code == 404:
+                        fallback = self._get_fallback_model(model)
+                        if fallback and fallback != model:
+                            logger.info(f"Switching model {model} -> {fallback} due to HTTP 404")
+                            model = fallback
+                            url = f"{GEMINI_API_BASE}/{model}:generateContent"
                             retries += 1
                             continue
-                        raise LLMRateLimitError()
 
                     if resp.status_code >= 500 and retries < self.max_retries:
                         await asyncio.sleep(2 ** retries)
@@ -378,4 +458,6 @@ class GeminiProvider(LLMProvider):
             except Exception as exc:
                 raise LLMError(f"Unexpected error communicating with Gemini: {str(exc)}") from exc
 
+        if last_status_code == 429:
+            raise LLMRateLimitError()
         raise LLMError("Exceeded max retries calling Gemini API")

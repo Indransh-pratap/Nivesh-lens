@@ -18,7 +18,7 @@ from app.schemas.exposure import (
 )
 from app.services.cas.normalizer import normalize_security_name
 from app.services.market_data.seed_data import seed_market_baseline
-from app.services.amfi.provider import AMFIPortfolioProvider
+from app.services.amfi.provider import AMFIPortfolioProvider, CanonicalSchemeResolver
 from app.services.diagnostics.hhi_engine import HHIItem, calculate_portfolio_company_hhi
 
 
@@ -53,38 +53,11 @@ class DatabaseMutualFundHoldingsProvider(MutualFundHoldingsProvider):
         fund_isin: str | None,
         fund_name: str,
     ) -> tuple[list[FundUnderlyingHolding], date | None]:
-        scheme: FundScheme | None = None
-
-        if fund_isin:
-            clean_isin = fund_isin.strip().upper()
-            scheme = (
-                self.db.query(FundScheme)
-                .filter(FundScheme.isin == clean_isin)
-                .first()
-            )
-
-        if not scheme and fund_name:
-            # Clean common CAS scheme prefixes like 'MAELC-' or 'PPFCG-'
-            cleaned = re.sub(r"^[A-Za-z0-9]+-", "", fund_name).strip()
-            # Clean common suffixes (Direct/Regular, Plan, Growth, etc.)
-            clean_name = re.sub(
-                r"\s*-\s*(Direct|Regular)?\s*(Plan)?\s*-\s*(Growth|IDCW|Dividend)?.*$",
-                "",
-                cleaned,
-                flags=re.IGNORECASE,
-            ).strip()
-            if len(clean_name) >= 4:
-                scheme = (
-                    self.db.query(FundScheme)
-                    .filter(FundScheme.scheme_name.ilike(f"%{clean_name}%"))
-                    .first()
-                )
-            if not scheme and len(cleaned) >= 4:
-                scheme = (
-                    self.db.query(FundScheme)
-                    .filter(FundScheme.scheme_name.ilike(f"%{cleaned[:20]}%"))
-                    .first()
-                )
+        scheme = CanonicalSchemeResolver.resolve_scheme(
+            self.db,
+            scheme_isin=fund_isin,
+            scheme_name=fund_name,
+        )
 
         if not scheme:
             return [], None
@@ -107,11 +80,16 @@ class DatabaseMutualFundHoldingsProvider(MutualFundHoldingsProvider):
             return [], None
 
         # Check if weights are expressed as fractional (e.g. 0.082) vs percentage (8.20)
-        raw_weights = [
-            Decimal(str(h.weight_percentage))
-            for h in latest_holdings
-            if h.weight_percentage is not None
-        ]
+        raw_weights: list[Decimal] = []
+        for h in latest_holdings:
+            if h.weight_percentage is None:
+                continue
+            try:
+                raw_weights.append(Decimal(str(h.weight_percentage)))
+            except Exception:
+                # A malformed disclosure must not take down the entire
+                # portfolio; it is omitted and represented by reconciliation.
+                continue
         sum_weights = sum(raw_weights)
         is_fractional = sum_weights > Decimal("0") and sum_weights <= Decimal("1.05")
 
@@ -119,7 +97,10 @@ class DatabaseMutualFundHoldingsProvider(MutualFundHoldingsProvider):
         for h in latest_holdings:
             if h.weight_percentage is None:
                 continue
-            weight = Decimal(str(h.weight_percentage))
+            try:
+                weight = Decimal(str(h.weight_percentage))
+            except Exception:
+                continue
             if weight <= Decimal("0"):
                 continue
 
@@ -436,7 +417,10 @@ def calculate_company_exposure(
 
                 for sh in underlying_holdings:
                     # exposure = fund_val * (weight / 100)
-                    exposure = (holding_val * sh.weight_percentage) / Decimal("100")
+                    try:
+                        exposure = (holding_val * sh.weight_percentage) / Decimal("100")
+                    except Exception:
+                        continue
                     if exposure <= Decimal("0"):
                         continue
 

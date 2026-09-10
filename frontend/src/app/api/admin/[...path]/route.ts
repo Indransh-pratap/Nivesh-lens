@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { NextRequest, NextResponse } from "next/server";
 
 import { auth } from "@/lib/auth";
+import { isUserAdmin } from "@/lib/admin";
 
 const fastApiUrl = (
   process.env.FASTAPI_URL?.replace(/\/+$/, "") ||
@@ -14,23 +15,42 @@ const sharedSecret = process.env.INTERNAL_API_SECRET;
 
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   if (!sharedSecret) {
-    return NextResponse.json({ error: { code: "CONFIGURATION_ERROR", message: "Server authentication bridge is not configured" } }, { status: 500 });
+    return NextResponse.json(
+      { error: { code: "CONFIGURATION_ERROR", message: "Server authentication bridge is not configured" } },
+      { status: 500 }
+    );
   }
   const session = await auth.api.getSession({ headers: await headers() });
   if (!session?.user) {
-    return NextResponse.json({ error: { code: "UNAUTHORIZED", message: "Please log in to import your portfolio." } }, { status: 401 });
+    return NextResponse.json(
+      { error: { code: "UNAUTHORIZED", message: "Please log in to access admin tools." } },
+      { status: 401 }
+    );
+  }
+
+  if (!isUserAdmin(session.user.email)) {
+    return NextResponse.json(
+      {
+        error: {
+          code: "FORBIDDEN",
+          message: "Admin privileges required. Your account is not authorized to access AMFI master data management.",
+        },
+      },
+      { status: 403 }
+    );
   }
   const { path } = await context.params;
-  // Phase 2 endpoints (stress test, correlation, benchmarking, etc.) use the
-  // same authenticated portfolio proxy.  Keeping this allow-list explicit is
-  // useful for security, but omitting phase2 makes every real analytics call
-  // fail with a misleading 404 from the frontend proxy.
-  const allowedPrefixes = ["portfolios", "imports", "cas"];
+  const allowedPrefixes = ["amfi"];
   if (!path || path.length === 0 || !allowedPrefixes.includes(path[0])) {
     return NextResponse.json({ error: { code: "NOT_FOUND", message: "Endpoint not found" } }, { status: 404 });
   }
-  const backendPath = `/api/${path.join("/")}`;
-  const body = request.method === "GET" || request.method === "DELETE" ? Buffer.alloc(0) : Buffer.from(await request.arrayBuffer());
+
+  const backendPath = `/api/admin/${path.join("/")}`;
+  const body =
+    request.method === "GET" || request.method === "DELETE"
+      ? Buffer.alloc(0)
+      : Buffer.from(await request.arrayBuffer());
+
   const timestamp = Math.floor(Date.now() / 1000).toString();
   const signature = createHmac("sha256", sharedSecret)
     .update(Buffer.concat([Buffer.from(`${timestamp}.${request.method}.${backendPath}.${session.user.id}.`), body]))

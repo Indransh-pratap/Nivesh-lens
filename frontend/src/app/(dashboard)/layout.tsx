@@ -34,6 +34,7 @@ import {
   Scale,
   Building2,
   Coins,
+  Database,
   type LucideIcon,
 } from "lucide-react";
 
@@ -49,6 +50,7 @@ import { OfflineBanner } from "@/components/ui/OfflineBanner";
 import { GlobalSearch } from "@/components/dashboard/GlobalSearch";
 import { MarketTickerBar } from "@/components/dashboard/MarketTickerBar";
 import { authClient } from "@/lib/auth-client";
+import { isUserAdmin } from "@/lib/admin";
 
 interface NavItem {
   name: string;
@@ -94,6 +96,8 @@ export default function DashboardLayout({
   React.useEffect(() => {
     if (!sessionLoading && !session?.user) {
       router.replace("/login");
+    } else if (session?.user) {
+      void usePortfolioStore.getState().loadActivePortfolio();
     }
   }, [session, sessionLoading, router]);
 
@@ -125,6 +129,8 @@ export default function DashboardLayout({
       .join("")
       .slice(0, 2)
       .toUpperCase() || "U";
+
+  const isAdmin = useMemo(() => isUserAdmin(userEmail), [userEmail]);
 
   // --------------------------------------------------
   // NAVIGATION
@@ -255,6 +261,15 @@ export default function DashboardLayout({
       {
         groupTitle: "System & Developers",
         items: [
+          ...(isAdmin
+            ? [
+                {
+                  name: "AMFI Data Management",
+                  href: "/admin/amfi-data",
+                  icon: Database,
+                },
+              ]
+            : []),
           {
             name: "API & Developers",
             href: "/api-sdk",
@@ -268,7 +283,7 @@ export default function DashboardLayout({
         ],
       },
     ],
-    [activeAlertsCount]
+    [activeAlertsCount, isAdmin]
   );
 
   // --------------------------------------------------
