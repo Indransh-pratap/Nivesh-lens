@@ -3,6 +3,7 @@ from app.models.holding import Holding
 from app.models.import_record import ImportRecord
 from app.models.portfolio import Portfolio
 from app.models.transaction import Transaction
+from app.models.aa import AAConsent, AASync, BankAccount, BankTransaction, AAWebhookDelivery
 from app.models.market_data import (
     FundScheme,
     FundNAVHistory,
@@ -21,6 +22,7 @@ __all__ = [
     "ImportRecord",
     "Portfolio",
     "Transaction",
+    "AAConsent", "AASync", "BankAccount", "BankTransaction", "AAWebhookDelivery",
     "FundScheme",
     "FundNAVHistory",
     "Benchmark",

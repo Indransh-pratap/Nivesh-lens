@@ -39,6 +39,7 @@ import { Button } from "@/components/ui/Button";
 import { CountUp } from "@/components/ui/CountUp";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { OnboardingTour } from "@/components/dashboard/OnboardingTour";
+import { BankAccounts } from "@/components/dashboard/BankAccounts";
 import { cn } from "@/lib/utils";
 import type { Holding } from "@/types";
 
@@ -480,6 +481,8 @@ export default function DashboardPage() {
       null
     );
 
+  const latestRequestRef = React.useRef(0);
+
   /*
    * =========================================================
    * LOAD REAL PORTFOLIO
@@ -489,6 +492,7 @@ export default function DashboardPage() {
   const loadPortfolio =
     useCallback(
       async () => {
+        const requestId = ++latestRequestRef.current;
         setIsLoading(true);
         setLoadError("");
 
@@ -504,10 +508,7 @@ export default function DashboardPage() {
               }
             );
 
-          if (
-            response.status ===
-            401
-          ) {
+          if (response.status === 401) {
             router.push(
               `/login?next=${encodeURIComponent(
                 window.location.pathname
@@ -517,12 +518,17 @@ export default function DashboardPage() {
             return;
           }
 
-          if (
-            !response.ok
-          ) {
-            throw new Error(
-              "Unable to load your portfolio."
-            );
+          if (!response.ok) {
+            const errorBody = await response.json().catch(() => null);
+            const message =
+              errorBody?.error?.message ||
+              errorBody?.detail ||
+              (response.status === 403
+                ? "You do not have permission to view this portfolio."
+                : response.status >= 500
+                  ? "Portfolio service is temporarily unavailable."
+                  : "Unable to load your portfolio.");
+            throw new Error(typeof message === "string" ? message : "Unable to load your portfolio.");
           }
 
           const data =
@@ -544,13 +550,11 @@ export default function DashboardPage() {
             ? localStorage.getItem("nivesh_active_portfolio_id")
             : null;
 
-          const portfolio =
+          // CAS/OTP ingestion has one canonical investment snapshot. A
+          // stale saved ID must never win over that source of truth.
+          const casPortfolio = data.find((item) => item.name === "CAS Portfolio");
+          const portfolio = casPortfolio ??
             (storedId ? data.find((item) => item.id === storedId) : null) ??
-            data.find(
-              (item) =>
-                item.name ===
-                "CAS Portfolio"
-            ) ??
             data[0];
 
           if (
@@ -559,6 +563,8 @@ export default function DashboardPage() {
             setHoldings([]);
             return;
           }
+
+          if (requestId !== latestRequestRef.current) return;
 
           if (typeof window !== "undefined" && portfolio.id) {
             localStorage.setItem("nivesh_active_portfolio_id", portfolio.id);
@@ -590,23 +596,12 @@ export default function DashboardPage() {
             allocation: portTotalVal > 0 ? (Number(h.currentValue) / portTotalVal) * 100 : 0,
           }));
 
-          console.log(
-            "Loaded portfolio:",
-            portfolio
-          );
-
-          console.log(
-            "Loaded holdings:",
-            remoteHoldings
-          );
-
           /*
            * PostgreSQL is source of truth.
            */
-          setHoldings(
-            remoteHoldings
-          );
+          setHoldings(remoteHoldings);
         } catch (error) {
+          if (requestId !== latestRequestRef.current) return;
           console.error(
             "Portfolio load error:",
             error
@@ -624,7 +619,7 @@ export default function DashboardPage() {
            */
           setHoldings([]);
         } finally {
-          setIsLoading(false);
+          if (requestId === latestRequestRef.current) setIsLoading(false);
         }
       },
       [
@@ -1173,6 +1168,8 @@ export default function DashboardPage() {
           </div>
         </>
       )}
+
+      <BankAccounts />
 
       {/* Tabs */}
       <div className="border-b border-border pb-2">

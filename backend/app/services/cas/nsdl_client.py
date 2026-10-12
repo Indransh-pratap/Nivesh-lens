@@ -180,7 +180,15 @@ class NsdlClient:
         self.base_url = base_url.rstrip("/") if base_url else ""
         self.api_key = api_key
         self.timeout = timeout
-        self.is_sandbox = is_sandbox or not bool(base_url and api_key and not base_url.startswith("mock://"))
+        self.is_sandbox = is_sandbox
+
+    def _ensure_configured(self) -> None:
+        if self.is_sandbox:
+            return
+        if not self.base_url or not self.api_key:
+            raise NsdlClientError(
+                "CAS OTP retrieval is not configured. Upload a CAS PDF or configure an authorized provider."
+            )
 
     def _headers(self) -> dict[str, str]:
         return {
@@ -200,7 +208,8 @@ class NsdlClient:
         if not clean_id:
             raise NsdlClientError("Identifier (PAN or mobile number) is required.")
 
-        if not self.is_sandbox and self.base_url:
+        self._ensure_configured()
+        if not self.is_sandbox:
             try:
                 async with httpx.AsyncClient(timeout=self.timeout) as client:
                     resp = await client.post(
@@ -219,7 +228,8 @@ class NsdlClient:
                 logger.exception("NSDL live request_otp failed: %s", exc)
                 raise NsdlClientError(f"Failed to communicate with CAS provider: {exc}") from exc
 
-        # Sandbox / Mock fallback
+        # Explicit sandbox-only fixture path. It is never selected merely
+        # because production credentials are absent.
         request_id = f"req_{uuid.uuid4().hex[:16]}"
         logger.info("NSDL Sandbox: Generated OTP request_id=%s for identifier=%s", request_id, clean_id[:4] + "***")
         return NsdlOtpRequestResult(
@@ -240,7 +250,8 @@ class NsdlClient:
         if not clean_otp or len(clean_otp) < 4:
             raise NsdlClientError("Please enter a valid OTP.")
 
-        if not self.is_sandbox and self.base_url:
+        self._ensure_configured()
+        if not self.is_sandbox:
             try:
                 async with httpx.AsyncClient(timeout=self.timeout) as client:
                     resp = await client.post(

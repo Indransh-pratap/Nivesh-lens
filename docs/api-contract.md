@@ -27,3 +27,5 @@ Errors have this consistent shape:
 ```json
 {"error":{"code":"PORTFOLIO_NOT_FOUND","message":"Portfolio not found"}}
 ```
+
+AA endpoints are also authenticated through the same signed proxy: `POST /api/aa/consent`, `GET /api/aa/consent/{id}`, `POST /api/aa/consent/{id}/data-session`, `POST /api/aa/sessions/{id}/poll`, `GET /api/aa/accounts`, and `GET /api/aa/transactions`. All identifiers are resolved against the signed user identity; browser-supplied user IDs are not accepted.

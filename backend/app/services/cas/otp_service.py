@@ -11,6 +11,7 @@ from app.models.cas_otp import CasOtpSession
 from app.models.holding import AssetType, Holding
 from app.models.import_record import ImportRecord, ImportStatus, SourceType
 from app.models.portfolio import Portfolio
+from app.models.transaction import Transaction
 from app.services.cas.nsdl_client import (
     NsdlClient,
     NsdlOtpRequestResult,
@@ -78,23 +79,30 @@ class CasOtpService:
         now = datetime.now(timezone.utc)
 
         # 1. Find or create Portfolio
+        # CAS PDF imports and the legacy CAS OTP flow are two acquisition
+        # paths for the same investment snapshot.  Keep one canonical
+        # portfolio instead of relying on an unordered IN query that could
+        # select an old "Synced Portfolio" record.
         portfolio = db.scalar(
             select(Portfolio).where(
                 Portfolio.user_id == user_id,
-                Portfolio.name.in_(["Synced Portfolio", "CAS Portfolio"]),
+                Portfolio.name == "CAS Portfolio",
             )
         )
 
         if portfolio is None:
             portfolio = Portfolio(
                 user_id=user_id,
-                name="Synced Portfolio",
+                name="CAS Portfolio",
                 total_value=Decimal("0"),
             )
             db.add(portfolio)
             db.flush()
 
-        # 2. Idempotency: Clear existing holdings for this portfolio before re-populating
+        # 2. Replace the previous investment snapshot atomically. Investment
+        # transactions belong to the same snapshot and must not survive with
+        # dangling/old holdings after an OTP refresh.
+        db.execute(delete(Transaction).where(Transaction.portfolio_id == portfolio.id))
         db.execute(delete(Holding).where(Holding.portfolio_id == portfolio.id))
         db.flush()
 

@@ -25,7 +25,7 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
   // same authenticated portfolio proxy.  Keeping this allow-list explicit is
   // useful for security, but omitting phase2 makes every real analytics call
   // fail with a misleading 404 from the frontend proxy.
-  const allowedPrefixes = ["portfolios", "imports", "cas"];
+  const allowedPrefixes = ["portfolios", "imports", "cas", "aa"];
   if (!path || path.length === 0 || !allowedPrefixes.includes(path[0])) {
     return NextResponse.json({ error: { code: "NOT_FOUND", message: "Endpoint not found" } }, { status: 404 });
   }

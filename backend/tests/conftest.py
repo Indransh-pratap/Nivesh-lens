@@ -3,6 +3,7 @@ import os
 os.environ.setdefault("DATABASE_URL", "sqlite://")
 os.environ.setdefault("INTERNAL_API_SECRET", "test-shared-secret")
 os.environ["MOCK_AI"] = "true"
+os.environ["NSDL_ENVIRONMENT"] = "sandbox"
 
 import pytest
 from fastapi.testclient import TestClient

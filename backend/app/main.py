@@ -17,7 +17,14 @@ from app.api.ai import router as ai_router
 from app.api.admin_amfi import router as admin_amfi_router
 from app.core.config import settings
 
+
+
+from app.api.routes.aa import router as aa_router
+
+
 logger = logging.getLogger(__name__)
+
+
 
 
 @asynccontextmanager
@@ -48,6 +55,7 @@ app.include_router(cas_router)
 app.include_router(phase2_router, prefix="/api", tags=["phase2"])
 app.include_router(ai_router, prefix="/api", tags=["ai"])
 app.include_router(admin_amfi_router, prefix="/api", tags=["admin-amfi"])
+app.include_router(aa_router)
 
 
 def error_response(status_code: int, code: str, message: str) -> JSONResponse:

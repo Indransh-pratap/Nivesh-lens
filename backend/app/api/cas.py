@@ -23,12 +23,12 @@ router = APIRouter(
 
 
 def get_nsdl_client() -> NsdlClient:
-    is_live = bool(settings.nsdl_base_url and settings.nsdl_api_key)
+    is_sandbox = settings.nsdl_environment.strip().lower() == "sandbox"
     return NsdlClient(
         base_url=settings.nsdl_base_url or "",
         api_key=settings.nsdl_api_key or "",
         timeout=settings.nsdl_timeout,
-        is_sandbox=not is_live,
+        is_sandbox=is_sandbox,
     )
 
 

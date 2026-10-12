@@ -1,198 +1,162 @@
+
 import re
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 
 from app.services.cas.models import RawCASData, RawHolding, RawTransaction
 
-
-_MONEY = r"-?[0-9][0-9,]*(?:\.\d+)?"
-_NUMBER = r"-?[0-9][0-9,]*(?:\.\d+)?"
+_MONEY = r"-?\s*(?:₹|Rs\.?\s*)?[0-9][0-9,]*(?:\.\d+)?"
 _ISIN = r"[A-Z]{2}[A-Z0-9]{9}[0-9]"
 
 
-def _clean(value: str) -> str:
-    return " ".join(value.strip().split())
+def _clean(value: str | None) -> str:
+    return " ".join((value or "").strip().split())
 
 
-def _parse_date(value: str) -> str:
-    """
-    Convert common CAS dates to the canonical DD/MM/YYYY format.
-    """
-    value = value.strip()
+def _decimal(value: str | None) -> Decimal | None:
+    if not value:
+        return None
 
-    for fmt in ("%d-%b-%Y", "%d/%m/%Y", "%d-%m-%Y"):
+    value = re.sub(r"^(?:₹|Rs\.?)\s*", "", value.strip(), flags=re.I)
+    value = value.replace(",", "").replace(" ", "")
+
+    try:
+        return Decimal(value)
+    except InvalidOperation:
+        return None
+
+
+def _parse_date(value: str) -> str | None:
+    value = _clean(value).replace(".", "-")
+    for fmt in (
+        "%d-%b-%Y",
+        "%d-%B-%Y",
+        "%d/%m/%Y",
+        "%d-%m-%Y",
+        "%Y-%m-%d",
+    ):
         try:
             return datetime.strptime(value, fmt).strftime("%d/%m/%Y")
         except ValueError:
             continue
-
-    raise ValueError(f"Unsupported CAS date: {value}")
-
-
-def _parse_statement_period(text: str):
-    match = re.search(
-        r"Statement\s+Period\s*:\s*"
-        r"(\d{1,2}[-/]\w+[-/]\d{4}|\d{1,2}[-/]\d{1,2}[-/]\d{4})"
-        r"\s+to\s+"
-        r"(\d{1,2}[-/]\w+[-/]\d{4}|\d{1,2}[-/]\d{1,2}[-/]\d{4})",
-        text,
-        re.IGNORECASE,
-    )
-
-    if not match:
-        return None
-
-    start = match.group(1)
-
-    for fmt in ("%d-%b-%Y", "%d/%m/%Y", "%d-%m-%Y"):
-        try:
-            return datetime.strptime(start, fmt).date()
-        except ValueError:
-            continue
-
     return None
 
 
-def _extract_folio_blocks(text: str) -> list[tuple[str, str]]:
-    """
-    Split CAMS CAS into:
-
-        Folio No -> everything until the next Folio No.
-
-    Returns:
-        [(folio_number, block), ...]
-    """
-    pattern = re.compile(
-        r"Folio\s+No\s*:\s*(?P<folio>[^\n]+)"
-        r"(?P<body>.*?)(?=Folio\s+No\s*:|\Z)",
-        re.IGNORECASE | re.DOTALL,
+def _parse_statement_period(text: str) -> str | None:
+    match = re.search(
+        r"statement\s+period\s*:?\s*"
+        r"(\d{1,2}[-/][A-Za-z0-9-]+[-/]\d{2,4})"
+        r"\s*(?:to|-)\s*"
+        r"(\d{1,2}[-/][A-Za-z0-9-]+[-/]\d{2,4})",
+        text,
+        re.I,
     )
+    if not match:
+        return None
+    return _parse_date(match.group(2)) or _parse_date(match.group(1))
 
+
+def _extract_folio_blocks(text: str) -> list[tuple[str, str]]:
+    matches = list(
+        re.finditer(
+            r"(?:Folio\s*(?:No\.?|Number)\s*:?\s*)([A-Z0-9/-]+)",
+            text,
+            re.I,
+        )
+    )
     blocks = []
-
-    for match in pattern.finditer(text):
-        folio = _clean(match.group("folio"))
-        body = match.group("body")
-
-        blocks.append((folio, body))
-
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        blocks.append((match.group(1).strip(), text[match.end():end]))
     return blocks
 
 
 def _extract_amc(block: str) -> str | None:
+    match = re.search(r"AMC\s*:?\s*([^\n|]+)", block, re.I)
+    return _clean(match.group(1)) if match else None
+
+
+def _extract_nominee(block: str) -> tuple[str | None, str | None]:
     match = re.search(
-        r"AMC\s*:\s*(?P<amc>[^\n|]+)",
+        r"Nominee(?:\s+Details)?(?:\s+\d+)?\s*:?\s*([^\n|]+)",
         block,
-        re.IGNORECASE,
-    )
-
-    if not match:
-        return None
-
-    return _clean(match.group("amc"))
-
-
-def _extract_nominee(block: str) -> tuple[str, str | None]:
-    """
-    Extract nominee registration status and name from CAMS folio header.
-    Returns (status, nominee_name) where status is CONFIRMED, MISSING, or UNKNOWN.
-    """
-    match = re.search(
-        r"Nominee\s*(?:1)?\s*:\s*(?P<nominee>[^\n|]+)",
-        block,
-        re.IGNORECASE,
+        re.I,
     )
     if not match:
-        return "UNKNOWN", None
+        return None, None
 
-    val = _clean(match.group("nominee"))
-    val_upper = val.upper()
-    if val_upper in ("NOT REGISTERED", "NONE", "UNASSIGNED", "NO", "NOT APPLICABLE", "NIL"):
+    value = _clean(match.group(1))
+    upper = value.upper()
+
+    if "NOT REGISTERED" in upper or "MISSING" in upper or upper in {"NONE", "UNASSIGNED", "NOT ASSIGNED"}:
         return "MISSING", None
-    elif val_upper in ("REGISTERED", "YES", "OK", "AVAILABLE"):
-        return "CONFIRMED", None
-    elif val:
-        return "CONFIRMED", val
+    if "CONFIRMED" in upper or "REGISTERED" in upper:
+        return "CONFIRMED", value
+    # A named nominee is an affirmative statement in this supported CAMS
+    # layout.  Unknown layouts still return UNKNOWN rather than MISSING.
+    return ("CONFIRMED", value) if value else ("UNKNOWN", None)
 
-    return "UNKNOWN", None
 
-
-def _extract_scheme_blocks(block: str) -> list[tuple[str, str]]:
-    """
-    Split a folio block into individual schemes.
-
-    A scheme starts with:
-        Scheme Name ... ISIN: XXXXX
-
-    and continues until the next scheme or the end of the folio.
-    """
-    pattern = re.compile(
-        rf"(?P<header>[^\n]+?)\s+ISIN\s*:\s*(?P<isin>{_ISIN})"
-        r"(?P<body>.*?)"
-        rf"(?=(?:[^\n]+?)\s+ISIN\s*:\s*{_ISIN}|\Z)",
-        re.IGNORECASE | re.DOTALL,
+def _extract_scheme_blocks(block: str) -> list[tuple[str, str, str]]:
+    matches = list(
+        re.finditer(
+            rf"(?im)^\s*(?P<name>[^\n]{{2,180}}?)\s+(?:ISIN\s*:\s*)?"
+            rf"(?P<isin>{_ISIN})\s*$",
+            block,
+        )
     )
 
-    schemes = []
+    results = []
+    for index, match in enumerate(matches):
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(block)
+        name = re.sub(r"\s+ISIN\s*:\s*$", "", _clean(match.group("name")), flags=re.I)
+        body = block[match.end():end]
 
-    for match in pattern.finditer(block):
-        name = _clean(match.group("header"))
-        isin = match.group("isin").upper()
-        body = match.group("body")
+        if name and not re.search(r"^(?:ISIN|Scheme Name|Folio)\b", name, re.I):
+            results.append((name, match.group("isin"), body))
 
-        schemes.append((name, isin, body))
-
-    return schemes
+    return results
 
 
-def _extract_advisor(scheme_block: str) -> str | None:
-    match = re.search(
-        r"Advisor\s*:\s*([^\n]+)",
-        scheme_block,
-        re.IGNORECASE,
-    )
-
-    if not match:
-        return None
-
-    return _clean(match.group(1))
+def _extract_advisor(body: str) -> str | None:
+    match = re.search(r"Advisor\s*:?\s*([^\n|]+)", body, re.I)
+    return _clean(match.group(1)) if match else None
 
 
 def _extract_closing_values(
     body: str,
-) -> tuple[str | None, str | None, str | None]:
-    """
-    Extract:
-
-        Closing Unit Balance
-        NAV as on ...
-        Value
-
-    from a CAMS scheme block.
-    """
+) -> tuple[Decimal | None, Decimal | None, Decimal | None]:
+    units = None
+    nav = None
+    value = None
 
     units_match = re.search(
-        rf"Closing\s+Unit\s+Balance\s*:\s*(?P<units>{_NUMBER})",
+        rf"(?:Closing\s+)?(?:Unit\s+)?Balance\s*:?\s*({_MONEY})",
         body,
-        re.IGNORECASE,
+        re.I,
     )
+    if units_match:
+        units = _decimal(units_match.group(1))
 
     nav_match = re.search(
-        rf"NAV\s+as\s+on\s+[^:]+:\s*(?:Rs\.?\s*)?(?P<nav>{_NUMBER})",
+        rf"(?:NAV|Net\s+Asset\s+Value)(?:\s+as\s+on\s+[^:\n]+)?"
+        rf"\s*:?\s*({_MONEY})",
         body,
-        re.IGNORECASE,
+        re.I,
     )
+    if nav_match:
+        nav = _decimal(nav_match.group(1))
 
     value_match = re.search(
-        rf"Value\s*:\s*(?:Rs\.?\s*)?(?P<value>{_MONEY})",
+        rf"(?:Market\s+)?Value\s*:?\s*({_MONEY})",
         body,
-        re.IGNORECASE,
+        re.I,
     )
+    if value_match:
+        value = _decimal(value_match.group(1))
 
-    return (
-        units_match.group("units") if units_match else None,
-        nav_match.group("nav") if nav_match else None,
-        value_match.group("value") if value_match else None,
-    )
+    return units, nav, value
+
 
 def _extract_transactions(
     body: str,
@@ -200,50 +164,58 @@ def _extract_transactions(
     isin: str,
     folio: str,
 ) -> list[RawTransaction]:
-    """
-    Parse rows with:
+    transactions = []
 
-        Date Description Amount Units NAV Unit Balance
-
-    Example:
-        02-Apr-2024 SIP Purchase - Instalment 1/12
-        5,000.00 33.412 149.64 33.412
-    """
-    transactions: list[RawTransaction] = []
-
-    pattern = re.compile(
-        rf"(?P<date>\d{{1,2}}-[A-Za-z]{{3}}-\d{{4}})"
-        rf"\s+"
-        rf"(?P<description>.+?)"
-        rf"\s+"
-        rf"(?P<amount>{_MONEY})"
-        rf"\s+"
-        rf"(?P<units>{_NUMBER})"
-        rf"\s+"
-        rf"(?P<nav>{_NUMBER})"
-        rf"\s+"
-        rf"(?P<balance>{_NUMBER})"
-        r"(?=\n|\Z)",
-        re.IGNORECASE,
+    date_pattern = (
+        r"(?P<date>\d{1,2}[-/][A-Za-z0-9-]+[-/]\d{2,4})"
     )
+    number_pattern = rf"({_MONEY})"
 
-    for match in pattern.finditer(body):
-        try:
-            transaction_date = _parse_date(match.group("date"))
-        except ValueError:
+    for line in body.splitlines():
+        line = _clean(line)
+        match = re.match(
+            rf"^{date_pattern}\s+(.+?)\s+"
+            rf"{number_pattern}\s+{number_pattern}"
+            rf"(?:\s+{number_pattern})?(?:\s+{number_pattern})?\s*$",
+            line,
+        )
+        if not match:
+            continue
+
+        date_value = _parse_date(match.group("date"))
+        if not date_value:
+            continue
+
+        tail = line[match.end("date"):].strip()
+        values = re.findall(_MONEY, tail)
+        if len(values) < 2:
+            continue
+
+        description_match = re.match(r"^(.*?)\s+" + _MONEY, tail)
+        description = _clean(description_match.group(1)) if description_match else tail
+
+        upper_description = description.upper()
+        if any(term in upper_description for term in ("OPENING BALANCE", "CLOSING BALANCE")):
+            continue
+
+        amount = _decimal(values[0])
+        units = _decimal(values[1])
+        nav = _decimal(values[2]) if len(values) > 2 else None
+
+        if amount is None and units is None:
             continue
 
         transactions.append(
             RawTransaction(
                 security_name=scheme_name,
                 isin=isin,
-                transaction_type=_clean(match.group("description")),
-                transaction_date=transaction_date,
-                units=match.group("units"),
-                amount=match.group("amount"),
+                transaction_type=description or "UNKNOWN",
+                transaction_date=date_value,
+                units=units,
+                amount=amount,
                 folio_number=folio,
-                nav=match.group("nav"),
-                unit_balance=match.group("balance"),
+                nav=nav,
+                unit_balance=None,
             )
         )
 
@@ -251,31 +223,24 @@ def _extract_transactions(
 
 
 def parse_cams(text: str) -> RawCASData:
-    """
-    Parse a CAMS-style Consolidated Account Statement.
+    if not text or not text.strip():
+        raise ValueError("CAMS statement is empty")
 
-    This parser converts the document into the project's
-    RawCASData representation and does not access the database.
-    """
+    text = text.replace("\x00", " ")
     statement_period = _parse_statement_period(text)
-
     holdings: list[RawHolding] = []
     transactions: list[RawTransaction] = []
 
     folio_blocks = _extract_folio_blocks(text)
-
     if not folio_blocks:
         raise ValueError("No CAMS folio records found")
 
-    for folio, folio_block in folio_blocks:
-        amc = _extract_amc(folio_block)
-        nom_status, nom_name = _extract_nominee(folio_block)
+    for folio, block in folio_blocks:
+        amc = _extract_amc(block)
+        nominee_status, nominee_name = _extract_nominee(block)
 
-        scheme_blocks = _extract_scheme_blocks(folio_block)
-
-        for scheme_name, isin, scheme_body in scheme_blocks:
-            advisor = _extract_advisor(scheme_body)
-
+        schemes = _extract_scheme_blocks(block)
+        for scheme_name, isin, scheme_body in schemes:
             units, nav, value = _extract_closing_values(scheme_body)
 
             if units is None or value is None:
@@ -289,11 +254,12 @@ def parse_cams(text: str) -> RawCASData:
                     average_cost=None,
                     current_value=value,
                     current_price=nav,
+                    asset_type="MUTUAL_FUND",
                     folio_number=folio,
                     amc=amc,
-                    advisor=advisor,
-                    nominee_status=nom_status,
-                    nominee_name=nom_name,
+                    advisor=_extract_advisor(scheme_body),
+                    nominee_status=nominee_status,
+                    nominee_name=nominee_name,
                 )
             )
 
@@ -307,7 +273,7 @@ def parse_cams(text: str) -> RawCASData:
             )
 
     if not holdings:
-        raise ValueError("No CAMS holdings found")
+        raise ValueError("No CAMS holdings could be extracted")
 
     return RawCASData(
         format_name="CAMS",

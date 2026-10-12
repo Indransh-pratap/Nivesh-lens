@@ -46,8 +46,8 @@ export default function HoldingsPage() {
           ? localStorage.getItem("nivesh_active_portfolio_id")
           : null;
       const portfolio =
-        (storedId ? data.find((p: any) => p.id === storedId) : null) ??
         data.find((p: any) => p.name === "CAS Portfolio") ??
+        (storedId ? data.find((p: any) => p.id === storedId) : null) ??
         data[0];
 
       if (!portfolio || !Array.isArray(portfolio.holdings)) return;

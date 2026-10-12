@@ -1,3 +1,4 @@
+
 "use client";
 
 import Link from "next/link";
@@ -21,13 +22,18 @@ export default function SignupPage() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
+    if (loading) return;
+
     setError("");
     setLoading(true);
 
     const cleanName = name.trim();
     const cleanEmail = email.trim().toLowerCase();
 
-    // Basic validation
+    // -------------------------
+    // Validation
+    // -------------------------
+
     if (!cleanName) {
       setError("Please enter your full name.");
       setLoading(false);
@@ -47,47 +53,70 @@ export default function SignupPage() {
     }
 
     try {
-      const result = await authClient.signUp.email({
-        name: cleanName,
-        email: cleanEmail,
-        password,
-      });
+      const { data, error: signupError } =
+        await authClient.signUp.email({
+          name: cleanName,
+          email: cleanEmail,
+          password,
+        });
 
-      console.log("Signup result:", result);
+      // -------------------------
+      // Better Auth error
+      // -------------------------
 
-      // Better Auth returned an error
-      if (result.error) {
-        console.error("Signup error:", result.error);
+      if (signupError) {
+        console.error("Signup error:", signupError);
 
         setError(
-          result.error.message ||
+          signupError.message ||
             "Unable to create account. Please try again."
         );
 
         return;
       }
 
+      // -------------------------
       // Signup succeeded
-      if (result.data) {
-        console.log("Account created successfully:", result.data);
+      // -------------------------
 
-        router.replace("/dashboard");
-        router.refresh();
-      } else {
+      if (!data) {
         setError(
-          "Account creation did not return a valid user. Please try again."
+          "Account creation did not return a valid response. Please try again."
         );
+
+        return;
       }
+
+      console.log("Account created successfully:", data);
+
+      /*
+       * Better Auth should create the session/cookie
+       * as part of the successful signup flow.
+       *
+       * Do not call router.refresh() immediately here.
+       */
+      router.replace("/dashboard");
     } catch (err) {
       console.error("Signup request failed:", err);
 
       if (err instanceof Error) {
-        const message = err.message.toLowerCase().includes("fetch") || err.message.toLowerCase().includes("network")
-          ? "Cannot reach the authentication server. Please check your connection and try again."
-          : err.message;
-        setError(message);
+        const message = err.message.toLowerCase();
+
+        if (
+          message.includes("fetch") ||
+          message.includes("network") ||
+          message.includes("failed to fetch")
+        ) {
+          setError(
+            "Cannot reach the authentication server. Please check your connection and try again."
+          );
+        } else {
+          setError(err.message);
+        }
       } else {
-        setError("Something went wrong while creating your account.");
+        setError(
+          "Something went wrong while creating your account."
+        );
       }
     } finally {
       setLoading(false);
@@ -130,75 +159,103 @@ export default function SignupPage() {
         {error && (
           <div
             role="alert"
+            aria-live="polite"
             className="p-3 rounded-xl border border-[var(--negative)]/30 bg-[var(--negative)]/10 text-xs text-[var(--negative)]"
           >
             {error}
           </div>
         )}
 
-        {/* Form */}
+        {/* Signup Form */}
         <form
           onSubmit={submit}
           className="space-y-3.5 text-xs"
         >
           {/* Name */}
           <div>
-            <label className="block text-muted-foreground mb-1.5 font-semibold">
+            <label
+              htmlFor="name"
+              className="block text-muted-foreground mb-1.5 font-semibold"
+            >
               Full Legal Name
             </label>
 
             <input
+              id="name"
+              name="name"
               required
               type="text"
               value={name}
-              onChange={(event) =>
-                setName(event.target.value)
-              }
+              onChange={(event) => {
+                setName(event.target.value);
+
+                if (error) {
+                  setError("");
+                }
+              }}
               placeholder="Your Name"
               autoComplete="name"
               disabled={loading}
-              className="h-10 w-full rounded-xl border border-border bg-background px-3 text-xs text-foreground outline-none focus:border-primary transition-colors disabled:opacity-60"
+              className="h-10 w-full rounded-xl border border-border bg-background px-3 text-xs text-foreground outline-none focus:border-primary transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
             />
           </div>
 
           {/* Email */}
           <div>
-            <label className="block text-muted-foreground mb-1.5 font-semibold">
+            <label
+              htmlFor="email"
+              className="block text-muted-foreground mb-1.5 font-semibold"
+            >
               Email Address
             </label>
 
             <input
+              id="email"
+              name="email"
               required
               type="email"
               value={email}
-              onChange={(event) =>
-                setEmail(event.target.value)
-              }
+              onChange={(event) => {
+                setEmail(event.target.value);
+
+                if (error) {
+                  setError("");
+                }
+              }}
               placeholder="you@example.com"
               autoComplete="email"
               disabled={loading}
-              className="h-10 w-full rounded-xl border border-border bg-background px-3 text-xs text-foreground outline-none focus:border-primary transition-colors disabled:opacity-60"
+              className="h-10 w-full rounded-xl border border-border bg-background px-3 text-xs text-foreground outline-none focus:border-primary transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
             />
           </div>
 
           {/* Password */}
           <div>
-            <label className="block text-muted-foreground mb-1.5 font-semibold">
+            <label
+              htmlFor="password"
+              className="block text-muted-foreground mb-1.5 font-semibold"
+            >
               Password
             </label>
 
             <input
+              id="password"
+              name="password"
               required
               type="password"
               value={password}
-              onChange={(event) =>
-                setPassword(event.target.value)
-              }
+              onChange={(event) => {
+                setPassword(event.target.value);
+
+                if (error) {
+                  setError("");
+                }
+              }}
               placeholder="Minimum 8 characters"
               autoComplete="new-password"
               minLength={8}
               disabled={loading}
-              className="h-10 w-full rounded-xl border border-border bg-background px-3 text-xs text-foreground outline-none focus:border-primary transition-colors disabled:opacity-60"
+              className="h-10 w-full rounded-xl border border-border bg-background px-3 text-xs text-foreground outline-none focus:border-primary transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
             />
 
             <p className="text-[10px] text-muted-foreground mt-1.5">

@@ -203,7 +203,15 @@ def build_diagnostics(
                 "isin": h.isin,
                 "value": val,
                 "plan_type": "Regular" if is_regular else "Direct",
-                "ter": Decimal(str(scheme.expense_ratio)) if scheme and getattr(scheme, "expense_ratio", None) else (Decimal("1.65") if is_regular else Decimal("0.85")),
+                # A statement name cannot verify a TER.  Missing scheme
+                # metadata stays missing so fee analysis reports uncertainty
+                # instead of presenting a guessed 0.85%/1.65% as fact.
+                "ter": (
+                    Decimal(str(scheme.expense_ratio))
+                    if scheme and getattr(scheme, "expense_ratio", None) is not None
+                    and Decimal(str(scheme.expense_ratio)) > Decimal("0")
+                    else None
+                ),
                 "underlying": underlying_items,
             })
 
@@ -220,7 +228,7 @@ def build_diagnostics(
             "account_number": str(folio),
             "nominee_status": nom_status,
             "nominee_name": nom_name,
-            "relationship": "Spouse" if nom_name else None,
+            "relationship": None,
             "source": "CAS",
         })
 

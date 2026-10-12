@@ -46,3 +46,68 @@ cd backend
 ```
 
 See [architecture.md](docs/architecture.md) and [api-contract.md](docs/api-contract.md).
+
+
+
+
+//
+
+
+
+
+backend/
+└── app/
+    ├── api/
+    │   ├── routes/
+    │   │   ├── auth.py
+    │   │   ├── portfolio.py
+    │   │   └── aa.py              ← NEW
+    │   │
+    │   └── webhooks/
+    │       └── setu.py             ← NEW
+    │
+    ├── core/
+    │   ├── config.py               ← Setu env vars
+    │   └── ...
+    │
+    ├── db/
+    │   └── ...
+    │
+    ├── models/
+    │   ├── ...
+    │   └── aa.py                   ← NEW
+    │
+    ├── schemas/
+    │   ├── ...
+    │   └── aa.py                   ← NEW
+    │
+    ├── services/
+    │   ├── ...
+    │   └── setu/
+    │       ├── __init__.py         ← NEW
+    │       ├── client.py           ← NEW
+    │       ├── consent.py          ← NEW
+    │       └── data.py             ← NEW
+    │
+    └── main.py   
+
+
+
+
+    otp sync
+
+
+
+Setu consent
+     ↓
+ACTIVE
+     ↓
+Create Data Session
+     ↓
+Setu prepares FI data
+     ↓
+Fetch FI data
+     ↓
+Nivesh Lens parser/normalizer
+     ↓
+Portfolio X-Ray
